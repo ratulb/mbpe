@@ -1,72 +1,45 @@
 from tokenizer import BPETokenizer
+from std.testing import assert_equal, assert_true, TestSuite
 
 
-def check(condition: Bool, label: String) raises -> Bool:
-    if condition:
-        print("  PASS:", label)
-        return True
-    else:
-        print("  FAIL:", label)
-        return False
-
-
-def test_unk_fallback() raises -> Bool:
-    """Train on a small corpus, then encode chars not in training set."""
+def test_unk_fallback() raises:
     var corpus = List[String]()
     corpus.append(String("abc"))
     var tok = BPETokenizer()
     tok.train(corpus, 12)
-    # "xyz" are not in the alphabet {'a','b','c',Ġ} — each maps to UNK (ID 0)
     var ids = tok.encode(String("xyz"))
-    var ok = True
-    ok = check(
-        len(ids) == 3 and ids[0] == 0 and ids[1] == 0 and ids[2] == 0,
-        "unknown chars mapped to UNK (0)",
-    ) and ok
-    ok = check(
-        tok.decode(ids) == "<UNK><UNK><UNK>",
-        "UNK IDs decode to visible <UNK> text",
-    ) and ok
-    return ok
+    assert_equal(len(ids), 3)
+    assert_equal(ids[0], 0)
+    assert_equal(ids[1], 0)
+    assert_equal(ids[2], 0)
+    assert_equal(tok.decode(ids), "<UNK><UNK><UNK>")
 
 
-def test_basic_roundtrip() raises -> Bool:
+def test_basic_roundtrip() raises:
     var corpus = List[String]()
     corpus.append(String("hello world"))
     var tok = BPETokenizer()
     tok.train(corpus, 30)
 
-    var ok = True
-    ok = check(len(tok) == 18, "small corpus: vocab stops at 18 (exhausted merges)") and ok
-    ok = check(
-        tok.decode(List[Int](length=1, fill=0)) == "<UNK>",
-        "ID 0 decodes to <UNK>",
-    ) and ok
+    assert_equal(len(tok), 18)
+    assert_equal(tok.decode(List[Int](length=1, fill=0)), "<UNK>")
 
     var ids = tok.encode(String("hello world"))
-    ok = check(len(ids) > 0, "encode returns tokens") and ok
-    ok = check(
-        tok.decode(ids) == "hello world",
-        "roundtrip preserves input",
-    ) and ok
-    return ok
+    assert_true(len(ids) > 0)
+    assert_equal(tok.decode(ids), "hello world")
 
 
-def test_empty_input() raises -> Bool:
+def test_empty_input() raises:
     var corpus = List[String]()
     corpus.append(String("abc"))
     var tok = BPETokenizer()
     tok.train(corpus, 12)
 
-    var ok = True
-    var empty_ids = tok.encode(String(""))
-    ok = check(len(empty_ids) == 0, "empty string → empty ids") and ok
-    var empty_decoded = tok.decode(List[Int]())
-    ok = check(empty_decoded.byte_length() == 0, "empty ids → empty string") and ok
-    return ok
+    assert_equal(len(tok.encode(String(""))), 0)
+    assert_equal(tok.decode(List[Int]()), "")
 
 
-def test_save_load() raises -> Bool:
+def test_save_load() raises:
     var corpus = List[String]()
     corpus.append(String("hello world"))
     var tok = BPETokenizer()
@@ -75,19 +48,14 @@ def test_save_load() raises -> Bool:
     tok.save("/tmp/bpe_test.json")
     var loaded = BPETokenizer.load("/tmp/bpe_test.json")
 
-    var ok = True
-    ok = check(len(loaded) == len(tok), "loaded vocab size matches") and ok
-
-    var text = String("hello world")
-    var loaded_ids = loaded.encode(text)
-    ok = check(
-        loaded.decode(loaded_ids) == "hello world",
-        "loaded tokenizer roundtrip OK",
-    ) and ok
-    return ok
+    assert_equal(len(loaded), len(tok))
+    assert_equal(
+        loaded.decode(loaded.encode(String("hello world"))),
+        "hello world",
+    )
 
 
-def test_deterministic() raises -> Bool:
+def test_deterministic() raises:
     var corpus = List[String]()
     corpus.append(String("hello world"))
 
@@ -96,13 +64,10 @@ def test_deterministic() raises -> Bool:
     var tok2 = BPETokenizer()
     tok2.train(corpus, 30)
 
-    return check(
-        len(tok1.merges) == len(tok2.merges),
-        "same corpus → same merge count",
-    )
+    assert_equal(len(tok1.merges), len(tok2.merges))
 
 
-def test_full_hf_corpus() raises -> Bool:
+def test_full_hf_corpus() raises:
     var corpus = List[String]()
     corpus.append(String("This is the Hugging Face Course."))
     corpus.append(String("This chapter is about tokenization."))
@@ -114,60 +79,20 @@ def test_full_hf_corpus() raises -> Bool:
     var tok = BPETokenizer()
     tok.train(corpus, 50)
 
-    var ok = True
-    ok = check(len(tok) == 50, "trains to vocab_size=50") and ok
+    assert_equal(len(tok), 50)
+    assert_equal(
+        tok.decode(tok.encode(String("This is not a token."))),
+        "This is not a token.",
+    )
 
-    var text = String("This is not a token.")
-    var ids = tok.encode(text)
-    ok = check(
-        tok.decode(ids) == "This is not a token.",
-        "HF corpus roundtrip OK",
-    ) and ok
-
-    # Save/load the bigger model too
     tok.save("/tmp/bpe_hf_test.json")
     var loaded = BPETokenizer.load("/tmp/bpe_hf_test.json")
-    ok = check(len(loaded) == 50, "loaded HF vocab size OK") and ok
-
-    var loaded_ids = loaded.encode(text)
-    ok = check(
-        loaded.decode(loaded_ids) == "This is not a token.",
-        "loaded HF roundtrip OK",
-    ) and ok
-    return ok
+    assert_equal(len(loaded), 50)
+    assert_equal(
+        loaded.decode(loaded.encode(String("This is not a token."))),
+        "This is not a token.",
+    )
 
 
 def main() raises:
-    var passed = 0
-    var total = 0
-
-    if test_unk_fallback():
-        passed += 1
-    total += 1
-
-    if test_basic_roundtrip():
-        passed += 1
-    total += 1
-
-    if test_empty_input():
-        passed += 1
-    total += 1
-
-    if test_save_load():
-        passed += 1
-    total += 1
-
-    if test_deterministic():
-        passed += 1
-    total += 1
-
-    if test_full_hf_corpus():
-        passed += 1
-    total += 1
-
-    print()
-    print("========================")
-    print("  ", passed, "/", total, "suites passed")
-    if passed < total:
-        print("  ", total - passed, "FAILURES")
-    print("========================")
+    TestSuite.discover_tests[__functions_in_module()]().run()
