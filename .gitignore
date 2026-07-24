@@ -4,3 +4,7 @@
 
 # editor swap files
 *.swp
+
+# scratch / debugging
+debug.mojo
+outputs/
