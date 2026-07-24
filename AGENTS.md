@@ -25,11 +25,17 @@ All commands run inside `pixi shell` or prefixed with `pixi run`:
 - `tokenizer.mojo` — `BPETokenizer` struct with `train()`/`encode()`/`decode()`,
   `save()`/`load()`. Also contains `PreTokenizer` and module-level helper
   functions `_compute_pair_freqs`, `_merge_pair`.
-- `main.mojo` — usage example: trains on a tiny corpus, encodes/decodes a
-  sentence, round-trips through save/load.
+- `main.mojo` — tests via `TestSuite.discover_tests` (std.testing).
 - Pre-tokenizer approximates GPT-2's `Ġ` convention (space → `Ġ` prefix).
-- Character-level base vocab (no `<UNK>` — unknown codepoints crash).
+- Character-level base vocab with `<UNK>` at ID 0 (unknown codepoints → 0).
+- **Internals work with `Int` token IDs** — no string manipulation in hot loops:
+  - `splits: Dict[String, List[Int]]` — each word is a list of token IDs
+  - `merges: List[Tuple[Int, Int, Int]]` — ordered `(a_id, b_id, merged_id)` (no dict-ordering footgun)
+  - `char_to_id: Dict[Int, Int]` — codepoint → base token ID
+  - `_tokenize` returns `List[Int]` directly; `encode` is a passthrough
+- Strings materialised only when needed: `vocab: List[String]` for decode,
+  vocab-string concatenation for new merge entries, save/load.
 - `encode(String) -> List[Int]`, `decode(List[Int]) -> String` (replaces `Ġ`
   with space on decode).
 - `Sized` trait enabled (`len(tok)` works). `Movable` for `^` transfer.
-- No test framework, no CI.
+- Project history tracked in `CHANGE_LOG.md` (append-only, dated entries).

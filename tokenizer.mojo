@@ -1,16 +1,69 @@
-"""BPE tokenizer — train, encode, decode, save, load."""
+"""Byte Pair Encoding tokenizer — train, encode, decode, save, load.
+
+Design philosophy
+-----------------
+The hot path (training merges, encoding) works exclusively with Int token IDs.
+Strings are materialised only when the outside world needs them: building the
+vocabulary display strings, decoding IDs back to readable text, and serialising
+to/from JSON.  This keeps allocations off the critical loop.
+
+Byte-level base vocabulary (GPT-2 style)
+-----------------------------------------
+Instead of scanning the training corpus for unique characters, we start with
+all 256 byte values (0x00–0xFF) as the base vocabulary.  Every Unicode
+codepoint decomposes into 1–4 UTF-8 bytes, so every possible input is
+representable.  There is no UNK token — ID 0 is simply byte 0x00.
+
+Since raw bytes 0–255 can't live in a String (many aren't valid UTF-8), GPT-2
+introduced a `bytes_to_unicode` table: printable bytes map to themselves and
+the remaining control/whitespace bytes map to unused Unicode codepoints ≥ 256.
+This keeps BPE's string operations working on visible characters while
+preserving every byte round-trip.
+
+References
+----------
+- Sennrich, Haddow, Birch (2016) — "Neural Machine Translation of Rare Words
+  with Subword Units"  https://arxiv.org/abs/1508.07909
+- GPT-2 encoder.py  —  `bytes_to_unicode` table
+  https://github.com/openai/gpt-2/blob/master/src/encoder.py
+- Karpathy minBPE  —  clean educational Python implementations
+  https://github.com/karpathy/minbpe
+- Hugging Face NLP Course  —  Chapter 6 (Tokenizers)
+  https://huggingface.co/learn/nlp-course/chapter6/5
+"""
 
 from std.pathlib import Path
 from std.python import Python
 
 
+# ---------------------------------------------------------------------------
+# Pre-tokeniser — approximates GPT-2's whitespace handling.
+#
+# GPT-2 uses a regex to split on category boundaries (letters vs numbers vs
+# punctuation vs whitespace) so that BPE never merges across them.  Our
+# version is simpler: it replaces each space with " <spacer_byte>" before
+# splitting on spaces, then reinserts the spacer on the front of each word.
+# This approximates the `Ġ` convention used by GPT-2 / tiktoken where a
+# leading Ġ means "this word was preceded by a space".
+#
+# The spacer character (U+0120, Latin capital letter G with inverted breve)
+# was chosen by OpenAI because it almost never appears in real text.
+#
+# Accepts StringSlice (any string view) to avoid forcing callers to own a
+# String.  Returns owned Strings because the words need to outlive the
+# input text (they become dict keys in the caller).
+# ---------------------------------------------------------------------------
+
 struct PreTokenizer:
     @staticmethod
     def tokenize[
+        mut: Bool,
+        //,
+        origin: Origin[mut=mut],
         spacer: StaticString = "Ġ",
-    ](var text: String) raises -> List[String]:
+    ](text: StringSlice[origin]) raises -> List[String]:
         var splits = (
-            StringSlice(text)
+            text
             .replace(" ", " " + spacer)
             .replace(".", " .")
             .split(" ")
@@ -21,54 +74,127 @@ struct PreTokenizer:
         return result^
 
 
+# ---------------------------------------------------------------------------
+# BPETokenizer
+#
+# States
+# ------
+#   vocab      : ID → display string        (List[String])
+#   merges     : ordered merge rules        (List[Tuple[Int, Int, Int]])
+#   byte_to_cp : raw byte → safe codepoint  (Dict[Int, Int])
+#   cp_to_byte : safe codepoint → raw byte  (Dict[Int, Int])
+#
+# Why an ordered list for merges?
+# -------------------------------
+# Dict iteration order is not guaranteed (hash-table).  If we stored merges
+# in a dict, re-loading the same data could produce a different iteration
+# order, which would apply merge rules in the wrong sequence and generate
+# different token IDs for the same text.  A List preserves insertion order,
+# so the merge sequence is deterministic across save/load cycles.
+#
+# Why Int IDs instead of strings in the hot loop?
+# -----------------------------------------------
+# Every allocation and comparison in the inner merge loop used to be on
+# heap-allocated String objects (one per character).  By switching to Int
+# token IDs the merge loop becomes:
+#   a) integer comparison  (one register op instead of strncmp)
+#   b) no per-character allocations during encoding
+#   c) encode() is a simple passthrough — _tokenize returns IDs directly
+# ---------------------------------------------------------------------------
+
 struct BPETokenizer(Sized & Movable):
     var vocab: List[String]
-    var stoi: Dict[String, Int]
-    var merges: Dict[Tuple[String, String], String]
+    var merges: List[Tuple[Int, Int, Int]]
+    var byte_to_cp: Dict[Int, Int]
+    var cp_to_byte: Dict[Int, Int]
 
     def __init__(out self):
         self.vocab = List[String]()
-        self.stoi = Dict[String, Int]()
-        self.merges = Dict[Tuple[String, String], String]()
+        self.merges = List[Tuple[Int, Int, Int]]()
+        self.byte_to_cp = Dict[Int, Int]()
+        self.cp_to_byte = Dict[Int, Int]()
+
+    # ── training ────────────────────────────────────────────────────────
+    # The algorithm:
+    #   1. Pre-tokenise the corpus and count word frequencies.
+    #   2. Build the byte→safe-unicode mapping (GPT-2 style).
+    #   3. Initialise the vocabulary: bytes 0–255 at IDs 0–255.
+    #   4. Split every word into a list of base token IDs (one per byte).
+    #   5. Repeatedly find the most frequent adjacent pair and merge it,
+    #      appending the new token to the vocabulary.
+    #
+    # Step 5 is the core BPE loop.  Each merge:
+    #   - records the pair (a_id, b_id) and the new merged_id in `merges`
+    #   - replaces every occurrence of a_id followed by b_id with merged_id
+    #   - appends the concatenated display string to `vocab`
+    #
+    # The loop stops when we reach vocab_size or when no pairs remain
+    # (every word has been reduced to a single token).
+    # ─────────────────────────────────────────────────────────────────────
 
     def train(mut self, corpus: List[String], vocab_size: Int) raises:
-        # 1. Pre-tokenize and compute word frequencies
+        # ---- 1. Pre-tokenise and compute word frequencies ----------------
         var word_freqs = Dict[String, Int]()
         for text in corpus:
             var words = PreTokenizer.tokenize(text)
             for word in words:
                 word_freqs[word] = 1 + word_freqs.get(word, 0)
 
-        # 2. Build the alphabet from all unique characters
-        var alphabet: List[String] = []
-        for word in word_freqs.keys():
-            for letter in word.codepoints():
-                var char_str = chr(Int(letter))
-                if char_str not in alphabet:
-                    alphabet.append(char_str)
-        sort(alphabet)
+        # ---- 2. Build byte ↔ safe-Unicode mapping -----------------------
+        self.byte_to_cp = Dict[Int, Int]()
+        self.cp_to_byte = Dict[Int, Int]()
+        var n = 0
+        for b in range(256):
+            # Printable ranges as defined by GPT-2's encoder.py.
+            # Everything else (control chars, whitespace, DEL, soft hyphen)
+            # gets a new codepoint ≥ 256.
+            var printable = False
+            if b >= 0x21 and b <= 0x7E:
+                printable = True
+            elif b >= 0xA1 and b <= 0xAC:
+                printable = True
+            elif b >= 0xAE and b <= 0xFF:
+                printable = True
+            if printable:
+                self.byte_to_cp[b] = b
+                self.cp_to_byte[b] = b
+            else:
+                var cp = 256 + n
+                self.byte_to_cp[b] = cp
+                self.cp_to_byte[cp] = b
+                n += 1
 
-        # 3. Initialize vocab: special token + every character
+        # ---- 3. Initialise vocabulary -----------------------------------
+        # IDs 0–255 are the 256 byte values, each mapped to its safe-Unicode
+        # representation.  Merge tokens are appended below.
         self.vocab = List[String](capacity=vocab_size)
-        self.vocab.append(String("<UNK>"))
-        self.stoi = Dict[String, Int]()
-        self.stoi["<UNK>"] = 0
-        for i, char in enumerate(alphabet):
-            self.vocab.append(char)
-            self.stoi[char] = i + 1
+        for b in range(256):
+            self.vocab.append(chr(self.byte_to_cp[b]))
 
-        # 4. Split each word into individual characters
-        var splits = Dict[String, List[String]]()
+        # ---- 4. Split each word into base token IDs ---------------------
+        # Every word is a sequence of raw UTF-8 bytes.  Each byte value is
+        # its own token ID (0x00 → 0, 0x01 → 1, ..., 0xFF → 255).
+        var splits = Dict[String, List[Int]]()
         for word in word_freqs.keys():
-            splits[word] = [chr(Int(c)) for c in word.codepoints()]
+            var sb = word.as_bytes()
+            var ids = List[Int](capacity=len(sb))
+            for i in range(len(sb)):
+                ids.append(Int(sb[i]))
+            splits[word] = ids^
 
-        # 5. Iteratively merge the most frequent pair
-        self.merges = Dict[Tuple[String, String], String]()
+        # ---- 5. Merge loop ----------------------------------------------
+        # Each iteration finds the most frequent adjacent pair across all
+        # words and replaces every occurrence with a single new token.
+        self.merges = List[Tuple[Int, Int, Int]]()
         while len(self.vocab) < vocab_size:
+            # Count how often each pair of adjacent token-IDs appears.
             var pair_freqs = _compute_pair_freqs(splits, word_freqs)
             if len(pair_freqs) == 0:
+                # No pairs left to merge — every word is a single token.
                 break
-            var best_pair: Tuple[String, String] = ("", "")
+
+            # Pick the pair with the highest frequency.
+            var best_pair: Tuple[Int, Int] = (0, 0)
             var max_freq = -1
             for pair_freq in pair_freqs.items():
                 var pair = pair_freq.key
@@ -76,53 +202,128 @@ struct BPETokenizer(Sized & Movable):
                 if max_freq == -1 or max_freq < freq:
                     best_pair = pair
                     max_freq = freq
-            _merge_pair(best_pair[0], best_pair[1], splits, word_freqs)
-            var joined = best_pair[0].copy() + best_pair[1].copy()
-            self.merges[best_pair] = joined
-            self.vocab.append(joined)
-            self.stoi[joined] = len(self.vocab) - 1
 
-    def _tokenize(self, text: String) raises -> List[String]:
+            # Apply the merge and record it.
+            var merged_id = len(self.vocab)
+            var a_id = best_pair[0]
+            var b_id = best_pair[1]
+            _merge_pair(a_id, b_id, merged_id, splits, word_freqs)
+            # Store in order so encoding always applies merges in the same
+            # sequence they were learned.
+            self.merges.append((a_id, b_id, merged_id))
+            # The display string is the concatenation of the two parts.
+            # We copy to avoid aliasing: self.vocab[a_id] is a view into
+            # the list, and append might reallocate.
+            var merged_str = self.vocab[a_id].copy() + self.vocab[b_id].copy()
+            self.vocab.append(merged_str)
+
+    # ── encoding ─────────────────────────────────────────────────────────
+    # The encoder reverses the training process:
+    #   1. Pre-tokenise the input text into words.
+    #   2. Split each word into its raw UTF-8 bytes → base token IDs.
+    #   3. Apply merge rules in the order they were learned.
+    #
+    # Step 3 scans every word's token-ID list for each merge rule.  When a
+    # matching adjacent pair is found, the pair is replaced by the merged ID
+    # and the scan continues from the same position (to catch consecutive
+    # merges).  This is O(N × M) where N is the number of merge rules and M
+    # is the total token count — not optimised, but transparent.
+    #
+    # A production tokenizer (like tiktoken) pre-computes a flat rank table
+    # and uses greedy longest-match instead of sequential rule application.
+    #
+    # Accepts StringSlice (any string view) so callers can pass any
+    # string-like value without owning a String.
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _tokenize[
+        mut: Bool,
+        //,
+        origin: Origin[mut=mut],
+    ](self, text: StringSlice[origin]) raises -> List[Int]:
         if text.byte_length() == 0:
-            return List[String]()
+            return List[Int]()
+        # ---- 1. Pre-tokenise into words ---------------------------------
         var words = PreTokenizer.tokenize(text)
-        var splits = [
-            [chr(Int(code)) for code in word.codepoints()]
-            for word in words
-        ]
-        for pair_merge in self.merges.items():
-            ref pair = pair_merge.key
-            ref merge = pair_merge.value
-            for idx, split in enumerate(splits):
+        # ---- 2. Split each word into base byte token IDs ----------------
+        var splits = List[List[Int]](capacity=len(words))
+        for word in words:
+            var sb = word.as_bytes()
+            var ids = List[Int](capacity=len(sb))
+            for i in range(len(sb)):
+                ids.append(Int(sb[i]))
+            splits.append(ids^)
+        # ---- 3. Apply merge rules in order ------------------------------
+        for (a_id, b_id, merged_id) in self.merges:
+            for idx in range(len(splits)):
+                ref split = splits[idx]
                 var i = 0
-                var split_copied = split.copy()
-                while i < len(split_copied) - 1:
-                    if split_copied[i] == pair[0] and split_copied[i + 1] == pair[1]:
-                        split_copied = (
-                            [e for e in split_copied[:i]]
-                            + [merge]
-                            + [e for e in split_copied[i + 2 :]]
+                while i < len(split) - 1:
+                    if split[i] == a_id and split[i + 1] == b_id:
+                        # Replace the pair with the merged token.
+                        # We do NOT advance i here — the newly inserted
+                        # merged token might pair with the next element.
+                        split = (
+                            [e for e in split[:i]]
+                            + [merged_id]
+                            + [e for e in split[i + 2:]]
                         )
                     else:
                         i += 1
-                splits[idx] = split_copied^
-        return [item for sublist in splits for item in sublist]
+        # Flatten all words into a single ID sequence.
+        var result = List[Int]()
+        for split in splits:
+            result += split.copy()
+        return result^
 
-    def encode(self, text: String) raises -> List[Int]:
-        var tokens = self._tokenize(text)
-        var ids = List[Int](capacity=len(tokens))
-        for token in tokens:
-            ids.append(self.stoi.get(token, 0))
-        return ids^
+    def encode[
+        mut: Bool,
+        //,
+        origin: Origin[mut=mut],
+    ](self, text: StringSlice[origin]) raises -> List[Int]:
+        return self._tokenize(text)
+
+    # ── decoding ─────────────────────────────────────────────────────────
+    # Decode is the inverse of encode:
+    #   1. Look up each token ID in vocab → safe-Unicode display string.
+    #   2. Reverse-map every safe-Unicode codepoint back to its raw byte.
+    #   3. Interpret the byte sequence as UTF-8 (lossy — invalid bytes
+    #      become the U+FFFD replacement character).
+    #   4. Replace the pre-tokeniser's Ġ spacer with regular spaces.
+    # ─────────────────────────────────────────────────────────────────────
 
     def decode(self, ids: List[Int]) raises -> String:
         if len(ids) == 0:
             return String("")
+        # ---- 1. Concatenate token display strings -----------------------
         var raw = StringSlice("").join([self.vocab[i] for i in ids])
-        return String(StringSlice(raw).replace("Ġ", " "))
+        # ---- 2. Reverse-map safe codepoints → raw bytes -----------------
+        var byte_list = List[UInt8](capacity=raw.byte_length())
+        for cp in raw.codepoints():
+            byte_list.append(UInt8(self.cp_to_byte[Int(cp)]))
+        # ---- 3. Interpret bytes as UTF-8 --------------------------------
+        var decoded = String(from_utf8_lossy=Span[UInt8](byte_list))
+        # ---- 4. Restore spaces from the Ġ convention --------------------
+        return String(StringSlice(decoded).replace("Ġ", " "))
 
     def __len__(self) -> Int:
         return len(self.vocab)
+
+    # ── serialization ────────────────────────────────────────────────────
+    # We serialize through Python's json module for simplicity.  The format:
+    #
+    #   {
+    #     "vocab": ["\x00", "!", "\"", ...],      # display strings
+    #     "merges": [[1, 5, 256], ...],            # (a_id, b_id, merged_id)
+    #     "byte_to_cp": [0, 256, 257, ...]         # 256-element lookup
+    #   }
+    #
+    # cp_to_byte is not stored explicitly — it's reconstructed from
+    # byte_to_cp on load (since it's the inverse mapping).
+    #
+    # Breaking change: old save files (character-level vocab) are not
+    # compatible with this format.
+    # ─────────────────────────────────────────────────────────────────────
 
     def save(self, path: String) raises:
         var json = Python.import_module("json")
@@ -130,17 +331,22 @@ struct BPETokenizer(Sized & Movable):
 
         var py_vocab = Python.list()
         for token in self.vocab:
-            py_vocab.append(Python.str(String(token)))
+            py_vocab.append(Python.str(token))
         data["vocab"] = py_vocab
 
         var py_merges = Python.list()
-        for merge in self.merges.items():
+        for (a_id, b_id, merged_id) in self.merges:
             var entry = Python.list()
-            entry.append(Python.str(String(merge.key[0])))
-            entry.append(Python.str(String(merge.key[1])))
-            entry.append(Python.str(String(merge.value)))
+            entry.append(Python.int(a_id))
+            entry.append(Python.int(b_id))
+            entry.append(Python.int(merged_id))
             py_merges.append(entry)
         data["merges"] = py_merges
+
+        var py_byte_to_cp = Python.list()
+        for b in range(256):
+            py_byte_to_cp.append(Python.int(self.byte_to_cp[b]))
+        data["byte_to_cp"] = py_byte_to_cp
 
         Path(path).write_text(String(json.dumps(data)))
 
@@ -151,26 +357,52 @@ struct BPETokenizer(Sized & Movable):
 
         var tok = Self()
 
+        # Reconstruct byte ↔ safe-codepoint mappings from the stored array.
+        var py_byte_to_cp = data["byte_to_cp"]
+        tok.byte_to_cp = Dict[Int, Int]()
+        tok.cp_to_byte = Dict[Int, Int]()
+        for b in range(256):
+            var cp = Int(py=py_byte_to_cp[b])
+            tok.byte_to_cp[b] = cp
+            tok.cp_to_byte[cp] = b
+
+        # Rebuild vocab (stoi is not needed — encoding uses byte arithmetic
+        # and the merge list).
         var py_vocab = data["vocab"]
         tok.vocab = List[String](capacity=len(py_vocab))
         for i in range(len(py_vocab)):
-            var token = String(py_vocab[i])
-            tok.vocab.append(token)
-            tok.stoi[token] = i
+            tok.vocab.append(String(py_vocab[i]))
 
+        # Rebuild ordered merge list.
         var py_merges = data["merges"]
-        tok.merges = Dict[Tuple[String, String], String]()
         for i in range(len(py_merges)):
             var entry = py_merges[i]
-            tok.merges[(String(entry[0]), String(entry[1]))] = String(entry[2])
+            var a_id = Int(py=entry[0])
+            var b_id = Int(py=entry[1])
+            var merged_id = Int(py=entry[2])
+            tok.merges.append((a_id, b_id, merged_id))
 
         return tok^
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Module-level helpers
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# These are separate functions rather than methods because they take mutable
+# references to the splits dictionary and don't need access to the tokenizer
+# struct's fields.
+
 def _compute_pair_freqs(
-    splits: Dict[String, List[String]], word_freqs: Dict[String, Int]
-) raises -> Dict[Tuple[String, String], Int]:
-    var pair_freqs = Dict[Tuple[String, String], Int]()
+    splits: Dict[String, List[Int]], word_freqs: Dict[String, Int]
+) raises -> Dict[Tuple[Int, Int], Int]:
+    """Count how often each adjacent pair of token-IDs appears in the corpus.
+
+    For each word, look at its current token-ID split and tally every pair
+    of adjacent IDs weighted by the word's frequency.  Words that are already
+    a single token are skipped (no pairs to count).
+    """
+    var pair_freqs = Dict[Tuple[Int, Int], Int]()
     for word_freq in word_freqs.items():
         var word = word_freq.key
         var freq = word_freq.value
@@ -184,22 +416,37 @@ def _compute_pair_freqs(
 
 
 def _merge_pair(
-    a: String,
-    b: String,
-    mut splits: Dict[String, List[String]],
+    a_id: Int,
+    b_id: Int,
+    merged_id: Int,
+    mut splits: Dict[String, List[Int]],
     word_freqs: Dict[String, Int],
 ) raises:
+    """Replace every occurrence of (a_id, b_id) with merged_id.
+
+    For every word in the corpus, scan its token-ID list.  When the pair
+    (a_id, b_id) is found, replace the pair with merged_id and do NOT
+    advance the scan position — the newly inserted token might itself be
+    the left half of another match at the same position.
+
+    This function mutates `splits` in place.  The final `.copy()` ensures
+    the dict entry is an owned value (the intermediate list comprehensions
+    may create references).
+    """
     for word in word_freqs:
         ref split = splits[word]
         if len(split) == 1:
             continue
         var i = 0
         while i < len(split) - 1:
-            if split[i] == a and split[i + 1] == b:
+            if split[i] == a_id and split[i + 1] == b_id:
+                # Rebuild the split: elements before the pair + merged
+                # token + elements after the pair.  i stays the same so
+                # we can immediately check (merged_id, split[i+1]).
                 split = (
                     [e for e in split[:i]]
-                    + [a + b]
-                    + [e for e in split[i + 2 :]]
+                    + [merged_id]
+                    + [e for e in split[i + 2:]]
                 )
             else:
                 i += 1
