@@ -138,9 +138,7 @@ struct PairCache(Movable):
     var _fallback: Dict[Int, Int]
 
     def __init__(out self):
-        self._cache = List[Int](capacity=CACHE_ENTRIES)
-        for _ in range(CACHE_ENTRIES):
-            self._cache.append(-1)
+        self._cache = List[Int](length=CACHE_ENTRIES, fill=-1)
         self._fallback = Dict[Int, Int]()
 
     def set(mut self, id1: Int, id2: Int, merged_id: Int):
@@ -337,10 +335,10 @@ def run() raises:
 
     # Benchmark
     var timer = Timer()
-    var n_iters = 10
+    var n_iters = 100
 
     for approach_idx in range(3):
-        var label = ""
+        var label: String
         if approach_idx == 0: label = "Approach A (Baseline - sequential rules)"
         elif approach_idx == 1: label = "Approach B (RankTable - byte-span lookup)"
         else: label = "Approach C (PairCache - ID-pair lookup)"
