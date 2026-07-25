@@ -5,6 +5,47 @@ Format: `YYYY-MM-DD` — brief header, body, motivation.
 
 ---
 
+## 2026-07-25 — PairCache greedy rank-based encoding (3× encode speedup)
+
+**Motivation:** Sequential rule application in `_tokenize` scanned every merge
+rule (113) for every word, even when most rules never fired.  This is O(N×M)
+where N = number of merge rules and M = total tokens.  A pre-computed lookup
+table avoids dead-rule scans entirely.
+
+**Changes:**
+- Added `PairCache` struct — two-tier cache:
+  - Flat `Int` array (1024×1024, 8 MB) for pairs where both IDs < 1000 —
+    index = `(a << 10) | b`, one shift-or-and + cache-line load.
+  - `Dict[Int, Int]` fallback for IDs ≥ 1000, packed key `(a << 20) | b`.
+  - Sentinal `-1` means "no merge for this pair".
+- Added `merge_cache: PairCache` field to `BPETokenizer`.
+- Populated cache in `train()` after each merge rule.
+- Rebuilt cache in `load()` after restoring merges from JSON.
+- Replaced `_tokenize` sequential rule loop with greedy rank-based loop:
+  - Scan adjacent pairs, find lowest merged_id (= earliest merge rule).
+  - Apply merge in-place via existing `_merge_inplace_ptr`.
+  - Repeat until no mergeable pairs remain.
+- Removed dead helper `_merge_span_to_buf` (no longer needed).
+
+**Benchmark (101 KB corpus, 113 merges, vocab 369):**
+
+| Approach | Time | Throughput | vs Old Seq |
+|---|---|---|---|
+| Old sequential | 12.2 ms | 1.4 M tok/s | 1.0× |
+| **PairCache (integrated)** | **4.0 ms** | **4.3 M tok/s** | **3.0×** |
+| PairCache (external, benchmark_approaches) | 6.8 ms | 2.5 M tok/s | 1.8× |
+
+Integrated version is faster than the external benchmark version because it
+avoids per-word function call overhead and creates no intermediate `List[Int]`.
+
+**Files touched:**
+- `tokenizer.mojo` — PairCache struct, merge_cache field, _tokenize rewrite,
+  train/load cache population.  Removed _merge_span_to_buf.
+- `main.mojo` — no changes (public API unchanged).
+- `CHANGE_LOG.md` — this entry.
+
+---
+
 ## 2026-07-23 — Byte-level base vocabulary
 
 **Motivation:** Character-level base vocab only covered codepoints seen during

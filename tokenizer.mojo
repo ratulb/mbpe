@@ -75,14 +75,51 @@ struct PreTokenizer:
 
 
 # ---------------------------------------------------------------------------
+# PairCache — O(1) (token-pair → merged-id) lookup table
+#
+# Two-tier design:
+#   Fast path: flat Int array (1024 × 1024) for IDs < 1000.
+#              Index = (a << 10) | b — one shift-or-and, one cache-line load.
+#   Slow path: Dict[Int, Int] for IDs ≥ 1000, packed key = (a << 20) | b.
+#
+# Built once after training/loading, read-only during encoding.
+# ---------------------------------------------------------------------------
+
+comptime CACHE_SHIFT: Int = 10
+comptime CACHE_SIZE: Int = 1000
+comptime CACHE_ENTRIES: Int = 1 << (CACHE_SHIFT * 2)
+comptime ENCODE_SHIFT: Int = 20
+
+struct PairCache(Movable):
+    var _fast: List[Int]
+    var _slow: Dict[Int, Int]
+
+    def __init__(out self):
+        self._fast = List[Int](length=CACHE_ENTRIES, fill=-1)
+        self._slow = Dict[Int, Int]()
+
+    def set(mut self, id1: Int, id2: Int, merged_id: Int):
+        if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
+            self._fast[(id1 << CACHE_SHIFT) | id2] = merged_id
+        else:
+            self._slow[(id1 << ENCODE_SHIFT) | id2] = merged_id
+
+    def get(self, id1: Int, id2: Int) -> Int:
+        if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
+            return self._fast[(id1 << CACHE_SHIFT) | id2]
+        return self._slow.get((id1 << ENCODE_SHIFT) | id2, -1)
+
+
+# ---------------------------------------------------------------------------
 # BPETokenizer
 #
 # States
 # ------
-#   vocab      : ID → display string        (List[String])
-#   merges     : ordered merge rules        (List[Tuple[Int, Int, Int]])
-#   byte_to_cp : raw byte → safe codepoint  (Dict[Int, Int])
-#   cp_to_byte : safe codepoint → raw byte  (Dict[Int, Int])
+#   vocab       : ID → display string         (List[String])
+#   merges      : ordered merge rules         (List[Tuple[Int, Int, Int]])
+#   merge_cache : fast pair→merged-id lookup  (PairCache)
+#   byte_to_cp  : raw byte → safe codepoint   (Dict[Int, Int])
+#   cp_to_byte  : safe codepoint → raw byte   (Dict[Int, Int])
 #
 # Why an ordered list for merges?
 # -------------------------------
@@ -105,12 +142,14 @@ struct PreTokenizer:
 struct BPETokenizer(Sized & Movable):
     var vocab: List[String]
     var merges: List[Tuple[Int, Int, Int]]
+    var merge_cache: PairCache
     var byte_to_cp: Dict[Int, Int]
     var cp_to_byte: Dict[Int, Int]
 
     def __init__(out self):
         self.vocab = List[String]()
         self.merges = List[Tuple[Int, Int, Int]]()
+        self.merge_cache = PairCache()
         self.byte_to_cp = Dict[Int, Int]()
         self.cp_to_byte = Dict[Int, Int]()
 
@@ -211,6 +250,7 @@ struct BPETokenizer(Sized & Movable):
             # Store in order so encoding always applies merges in the same
             # sequence they were learned.
             self.merges.append((a_id, b_id, merged_id))
+            self.merge_cache.set(a_id, b_id, merged_id)
             # The display string is the concatenation of the two parts.
             # We copy to avoid aliasing: self.vocab[a_id] is a view into
             # the list, and append might reallocate.
@@ -218,19 +258,17 @@ struct BPETokenizer(Sized & Movable):
             self.vocab.append(merged_str)
 
     # ── encoding ─────────────────────────────────────────────────────────
-    # The encoder reverses the training process:
+    # The encoder uses greedy rank-based merge via PairCache:
     #   1. Pre-tokenise the input text into words.
     #   2. Split each word into its raw UTF-8 bytes → base token IDs.
-    #   3. Apply merge rules in the order they were learned.
+    #   3. Repeatedly scan adjacent ID-pairs, find the lowest-rank
+    #      (earliest-learned) merge, and apply it in-place.
+    #   4. Stop when no mergeable pairs remain.
     #
-    # Step 3 scans every word's token-ID list for each merge rule.  When a
-    # matching adjacent pair is found, the pair is replaced by the merged ID
-    # and the scan continues from the same position (to catch consecutive
-    # merges).  This is O(N × M) where N is the number of merge rules and M
-    # is the total token count — not optimised, but transparent.
-    #
-    # A production tokenizer (like tiktoken) pre-computes a flat rank table
-    # and uses greedy longest-match instead of sequential rule application.
+    # The merge_cache (PairCache) provides O(1) pair→merged-id lookup,
+    # eliminating dead-rule scans.  Each word requires at most N merge
+    # passes where N is the word's token count (worst case: one merge
+    # per pass).  Typical text does ~3–5 passes per word.
     #
     # Accepts StringSlice (any string view) so callers can pass any
     # string-like value without owning a String.
@@ -245,7 +283,7 @@ struct BPETokenizer(Sized & Movable):
             return List[Int]()
         # ---- 1. Pre-tokenise into words ---------------------------------
         var words = PreTokenizer.tokenize(text)
-        # ---- 2. Per word: read bytes, merge in-place, collect -----------
+        # ---- 2. Per word: bytes → Ints, greedy rank-based merge ---------
         var result = List[Int]()
         for word in words:
             var sb = word.as_bytes()
@@ -253,27 +291,31 @@ struct BPETokenizer(Sized & Movable):
             var n = len(sb)
             var start = len(result)
 
-            # Reserve space in result (one bulk extension, no per-byte append)
+            # Reserve space in result (one bulk extension)
             for _ in range(n):
                 result.append(0)
             var dst = Span(result).unsafe_ptr() + start
 
-            # First merge rule: read from Span[UInt8], write to result
-            if len(self.merges) > 0:
-                var first = self.merges[0]
-                n = _merge_span_to_buf(
-                    dst, ptr, n, first[0], first[1], first[2],
-                )
-                # Remaining rules: in-place on result's buffer
-                for idx in range(1, len(self.merges)):
-                    var rule = self.merges[idx]
-                    n = _merge_inplace_ptr(
-                        dst, n, rule[0], rule[1], rule[2],
-                    )
-            else:
-                # No merges: just copy bytes as Ints
-                for i in range(n):
-                    dst[i] = Int(ptr[i])
+            # Copy bytes as Ints into result's tail
+            for i in range(n):
+                dst[i] = Int(ptr[i])
+
+            # Greedy lowest-rank merge loop
+            while n >= 2:
+                var best_rank = -1
+                var best_a = -1
+                var best_b = -1
+                var best_m = -1
+                for i in range(n - 1):
+                    var merged = self.merge_cache.get(dst[i], dst[i + 1])
+                    if merged >= 0 and (best_rank < 0 or merged < best_rank):
+                        best_rank = merged
+                        best_a = dst[i]
+                        best_b = dst[i + 1]
+                        best_m = merged
+                if best_rank < 0:
+                    break
+                n = _merge_inplace_ptr(dst, n, best_a, best_b, best_m)
 
             # Trim excess from merge shrinkage
             while len(result) > start + n:
@@ -386,6 +428,7 @@ struct BPETokenizer(Sized & Movable):
             var b_id = Int(py=entry[1])
             var merged_id = Int(py=entry[2])
             tok.merges.append((a_id, b_id, merged_id))
+            tok.merge_cache.set(a_id, b_id, merged_id)
 
         return tok^
 
@@ -393,36 +436,6 @@ struct BPETokenizer(Sized & Movable):
 # ═══════════════════════════════════════════════════════════════════════════
 # Hot-path helpers — raw pointer operations, zero allocations
 # ═══════════════════════════════════════════════════════════════════════════
-
-@always_inline
-def _merge_span_to_buf[
-    src_mut: Bool,
-    //,
-    src_origin: Origin[mut=src_mut],
-](
-    dst: UnsafePointer[Int, MutAnyOrigin],
-    src: UnsafePointer[UInt8, src_origin],
-    n: Int,
-    a: Int, b: Int, m: Int,
-) -> Int:
-    """
-    Read bytes from src (UInt8*), write Ints to dst.
-    If (a, b) matches adjacent bytes, write merged_id (m) instead.
-    Returns new length after merges (always <= n).
-    No bounds checks, zero allocations.
-    """
-    var w = 0
-    var i = 0
-    while i < n:
-        if i < n - 1 and Int(src[i]) == a and Int(src[i + 1]) == b:
-            dst[w] = m
-            i += 2
-        else:
-            dst[w] = Int(src[i])
-            i += 1
-        w += 1
-    return w
-
 
 @always_inline
 def _merge_inplace_ptr(
