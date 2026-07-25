@@ -273,7 +273,8 @@ struct BPETokenizer(Sized & Movable):
         # Flatten all words into a single ID sequence.
         var result = List[Int]()
         for split in splits:
-            result += split.copy()
+            #result += split.copy()
+            result.extend(split.copy())
         return result^
 
     def encode[
