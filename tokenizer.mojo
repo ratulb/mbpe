@@ -245,36 +245,40 @@ struct BPETokenizer(Sized & Movable):
             return List[Int]()
         # ---- 1. Pre-tokenise into words ---------------------------------
         var words = PreTokenizer.tokenize(text)
-        # ---- 2. Split each word into base byte token IDs ----------------
-        var splits = List[List[Int]](capacity=len(words))
+        # ---- 2. Per word: read bytes, merge in-place, collect -----------
+        var result = List[Int]()
         for word in words:
             var sb = word.as_bytes()
-            var ids = List[Int](capacity=len(sb))
-            for i in range(len(sb)):
-                ids.append(Int(sb[i]))
-            splits.append(ids^)
-        # ---- 3. Apply merge rules in order ------------------------------
-        for (a_id, b_id, merged_id) in self.merges:
-            for idx in range(len(splits)):
-                ref split = splits[idx]
-                var i = 0
-                while i < len(split) - 1:
-                    if split[i] == a_id and split[i + 1] == b_id:
-                        # Replace the pair with the merged token.
-                        # We do NOT advance i here — the newly inserted
-                        # merged token might pair with the next element.
-                        split = (
-                            [e for e in split[:i]]
-                            + [merged_id]
-                            + [e for e in split[i + 2:]]
-                        )
-                    else:
-                        i += 1
-        # Flatten all words into a single ID sequence.
-        var result = List[Int]()
-        for split in splits:
-            #result += split.copy()
-            result.extend(split.copy())
+            var ptr = sb.unsafe_ptr()
+            var n = len(sb)
+            var start = len(result)
+
+            # Reserve space in result (one bulk extension, no per-byte append)
+            for _ in range(n):
+                result.append(0)
+            var dst = Span(result).unsafe_ptr() + start
+
+            # First merge rule: read from Span[UInt8], write to result
+            if len(self.merges) > 0:
+                var first = self.merges[0]
+                n = _merge_span_to_buf(
+                    dst, ptr, n, first[0], first[1], first[2],
+                )
+                # Remaining rules: in-place on result's buffer
+                for idx in range(1, len(self.merges)):
+                    var rule = self.merges[idx]
+                    n = _merge_inplace_ptr(
+                        dst, n, rule[0], rule[1], rule[2],
+                    )
+            else:
+                # No merges: just copy bytes as Ints
+                for i in range(n):
+                    dst[i] = Int(ptr[i])
+
+            # Trim excess from merge shrinkage
+            while len(result) > start + n:
+                _ = result.pop()
+
         return result^
 
     def encode[
@@ -384,6 +388,65 @@ struct BPETokenizer(Sized & Movable):
             tok.merges.append((a_id, b_id, merged_id))
 
         return tok^
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Hot-path helpers — raw pointer operations, zero allocations
+# ═══════════════════════════════════════════════════════════════════════════
+
+@always_inline
+def _merge_span_to_buf[
+    src_mut: Bool,
+    //,
+    src_origin: Origin[mut=src_mut],
+](
+    dst: UnsafePointer[Int, MutAnyOrigin],
+    src: UnsafePointer[UInt8, src_origin],
+    n: Int,
+    a: Int, b: Int, m: Int,
+) -> Int:
+    """
+    Read bytes from src (UInt8*), write Ints to dst.
+    If (a, b) matches adjacent bytes, write merged_id (m) instead.
+    Returns new length after merges (always <= n).
+    No bounds checks, zero allocations.
+    """
+    var w = 0
+    var i = 0
+    while i < n:
+        if i < n - 1 and Int(src[i]) == a and Int(src[i + 1]) == b:
+            dst[w] = m
+            i += 2
+        else:
+            dst[w] = Int(src[i])
+            i += 1
+        w += 1
+    return w
+
+
+@always_inline
+def _merge_inplace_ptr(
+    buf: UnsafePointer[Int, MutAnyOrigin],
+    n: Int,
+    a: Int, b: Int, m: Int,
+) -> Int:
+    """
+    In-place write-pointer shift on Int buffer.
+    Scan with read pointer i, write to buf[w].
+    Skips ahead by 2 when (a,b) matches, writes merged_id.
+    Returns new length.
+    """
+    var w = 0
+    var i = 0
+    while i < n:
+        if i < n - 1 and buf[i] == a and buf[i + 1] == b:
+            buf[w] = m
+            i += 2
+        else:
+            buf[w] = buf[i]
+            i += 1
+        w += 1
+    return w
 
 
 # ═══════════════════════════════════════════════════════════════════════════
