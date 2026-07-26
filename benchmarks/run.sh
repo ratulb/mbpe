@@ -82,16 +82,23 @@ echo "════════════════════════�
 echo "  Results Summary"
 echo "═══════════════════════════════════════════════════════════════"
 
-mojo_enc=$(grep "encode" "$MOJO_RESULT" | head -1 || echo "N/A")
-mojo_dec=$(grep "decode" "$MOJO_RESULT" | head -1 || echo "N/A")
-py_enc=$(grep "encode" "$PY_RESULT" | head -1 || echo "N/A")
-py_dec=$(grep "decode" "$PY_RESULT" | head -1 || echo "N/A")
-rs_enc=$(grep "encode" "$RS_RESULT" | head -1 || echo "N/A")
-rs_dec=$(grep "decode" "$RS_RESULT" | head -1 || echo "N/A")
+# Extract "best:" lines — each file has encode then decode.
+# Format:   best: XX.X ms   Y.Y M tok/s
+# Extract encode/decode speeds from "best:" lines (first = encode, second = decode)
+mojo_best=$(awk '/best:/ {print $4, $5, $6}' "$MOJO_RESULT")
+py_best=$(awk '/best:/ {print $4, $5, $6}' "$PY_RESULT")
+rs_best=$(awk '/best:/ {print $4, $5, $6}' "$RS_RESULT")
 
-printf "\n%-22s %-26s %-26s\n" "" "encode (best)" "decode (best)"
-printf "%-22s %-26s %-26s\n" "──────────────────────" "──────────────────────────" "──────────────────────────"
-printf "%-22s %-26s %-26s\n" "Mojo"          "$mojo_enc" "$mojo_dec"
-printf "%-22s %-26s %-26s\n" "tiktoken (Python)" "$py_enc" "$py_dec"
-printf "%-22s %-26s %-26s\n" "tiktoken-rs (Rust)"  "$rs_enc" "$rs_dec"
+mojo_enc=$(echo "$mojo_best" | sed -n '1p')
+mojo_dec=$(echo "$mojo_best" | sed -n '2p')
+py_enc=$(echo "$py_best" | sed -n '1p')
+py_dec=$(echo "$py_best" | sed -n '2p')
+rs_enc=$(echo "$rs_best" | sed -n '1p')
+rs_dec=$(echo "$rs_best" | sed -n '2p')
+
+printf "\n%-22s %-16s %-16s\n" "" "encode (best)" "decode (best)"
+printf "%s\n" "──────────────────────────────────────────────────────"
+printf "%-22s %-16s %-16s\n" "Mojo"                "$mojo_enc" "$mojo_dec"
+printf "%-22s %-16s %-16s\n" "tiktoken (Python)"   "$py_enc" "$py_dec"
+printf "%-22s %-16s %-16s\n" "tiktoken-rs (Rust)"  "$rs_enc" "$rs_dec"
 echo ""
