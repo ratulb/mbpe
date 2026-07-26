@@ -1,11 +1,13 @@
-"""BPETokenizer encode/decode speed benchmark.
+"""Shared benchmark helpers — parameterized by pre-tokenizer type.
 
-Usage: mojo -I . benchmarks/benchmark.mojo
+Dispatch entry points: bm_default.mojo, bm_gpt2.mojo, bm_gpt4.mojo
 """
 
 from tokenizer import BPETokenizer
+from pretokenizer import PreTokenizer, GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer
 from std.pathlib import Path
 from std.time import perf_counter_ns
+
 
 
 struct Timer:
@@ -72,17 +74,24 @@ def fmt_tok_s(tokens: Int, ns: Int) -> String:
         return String(per_sec) + " tok/s"
 
 
-def main() raises:
+def fmt_name(prefix: String) -> String:
+    if prefix == "gpt2":
+        return "BPETokenizer[GPT2Pretokenizer]"
+    elif prefix == "gpt4":
+        return "BPETokenizer[GPT4Pretokenizer]"
+    else:
+        return "BPETokenizer[GPreTokenizer]"
+
+
+def run[PT: PreTokenizer = GPreTokenizer](prefix: String) raises:
     print("=" * 60)
-    print("  Mojo  — BPETokenizer benchmark")
+    print("  Mojo  — " + fmt_name(prefix))
     print("=" * 60)
 
-    # Read corpus
     var corpus = Path("benchmarks/corpus.txt").read_text()
     var n_bytes = corpus.byte_length()
-    print("\nCorpus: " + String(n_bytes) + " bytes")
+    print("Corpus: " + String(n_bytes) + " bytes")
 
-    # Split into lines for training
     var lines = corpus.split("\n")
     var train_corpus = List[String]()
     for line in lines:
@@ -90,43 +99,37 @@ def main() raises:
         if s.byte_length() > 0:
             train_corpus.append(s^)
 
-    # Train
-    print("Training BPETokenizer (vocab_size=500)...")
+    print("Training (vocab_size=500)...")
     var timer = Timer()
     timer.start()
-    var tok = BPETokenizer()
+    var tok = BPETokenizer[PT]()
     tok.train(train_corpus, 500)
     var train_ns = timer.elapsed_ns()
     print("  train: " + fmt_ns(train_ns))
+    print("  vocab: " + String(len(tok)) + "  merges: " + String(len(tok.merges)))
 
-    # First encode to get token count
     var ids = tok.encode(corpus)
     var num_tokens = len(ids)
     print("  tokens: " + String(num_tokens))
-    print("  vocab: " + String(len(tok)) + "  merges: " + String(len(tok.merges)))
 
-    # Encode benchmark
     print("\n── encode ──")
     var encode_times = List[Int]()
     var n_iters = 20
-    _ = tok.encode(corpus)  # warmup
+    _ = tok.encode(corpus)
     for _ in range(n_iters):
         timer.start()
         _ = tok.encode(corpus)
         encode_times.append(timer.elapsed_ns())
-
     var enc_best = min_ns(encode_times)
     print("  best: " + fmt_ns(enc_best) + "  " + fmt_tok_s(num_tokens, enc_best))
 
-    # Decode benchmark
     print("\n── decode ──")
     var decode_times = List[Int]()
-    _ = tok.decode(ids)  # warmup
+    _ = tok.decode(ids)
     for _ in range(n_iters):
         timer.start()
         _ = tok.decode(ids)
         decode_times.append(timer.elapsed_ns())
-
     var dec_best = min_ns(decode_times)
     print("  best: " + fmt_ns(dec_best) + "  " + fmt_tok_s(num_tokens, dec_best))
 

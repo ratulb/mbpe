@@ -6,6 +6,8 @@ version = "0.1.0"
 
 [tasks]
 benchmark = "bash benchmarks/run.sh"
+benchmark-gpt2 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt2" } }
+benchmark-gpt4 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt4" } }
 
 [dependencies]
 python = ">=3.14.6,<3.15"

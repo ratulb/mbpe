@@ -52,12 +52,19 @@ MOJO_RESULT=$BMDIR/mojo_result.txt
 PY_RESULT=$BMDIR/py_result.txt
 RS_RESULT=$BMDIR/rs_result.txt
 
+# ── Select Mojo entry point based on BPE_PT ──────────────────────
+case "${BPE_PT:-}" in
+  gpt2) MOJO_ENTRY="bm_gpt2.mojo"; MOJO_LABEL="BPETokenizer[GPT2Pretokenizer]" ;;
+  gpt4) MOJO_ENTRY="bm_gpt4.mojo"; MOJO_LABEL="BPETokenizer[GPT4Pretokenizer]" ;;
+  *)    MOJO_ENTRY="bm_default.mojo"; MOJO_LABEL="BPETokenizer[GPreTokenizer]" ;;
+esac
+
 # ── Mojo ──────────────────────────────────────────────────────────
 echo ""
 echo "───────────────────────────────────────────────────────────────"
-echo "  1/3  Mojo  (BPETokenizer)"
+echo "  1/3  Mojo  ($MOJO_LABEL)"
 echo "───────────────────────────────────────────────────────────────"
-mojo -I . "$BMDIR/benchmark.mojo" 2>&1 | tee "$MOJO_RESULT"
+mojo -I . "$BMDIR/$MOJO_ENTRY" 2>&1 | tee "$MOJO_RESULT"
 
 # ── Python tiktoken ───────────────────────────────────────────────
 echo ""
