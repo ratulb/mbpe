@@ -607,26 +607,28 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
     def decode[mut: Bool, //, origin: Origin[mut=mut]](self, ids: Span[Int, origin]) raises -> String:
         if len(ids) == 0:
             return String("")
+        var lens = self.token_lengths.unsafe_ptr()
+        var offs = self.token_offsets.unsafe_ptr()
+        var n_tokens = len(self.token_lengths)
         var total: Int = 0
         for id in ids:
-            if id < 0 or id >= len(self.token_lengths):
+            if id < 0 or id >= n_tokens:
                 raise Error("token ID out of range: " + String(id))
-            total += self.token_lengths[id]
+            total += lens[id]
         if total == 0:
             return String("")
         var buf = alloc[UInt8](total)
         var ptr = self.token_bytes.unsafe_ptr()
         var write_offset: Int = 0
         for id in ids:
-            var n = self.token_lengths[id]
+            var n = lens[id]
             if n > 0:
                 memcpy(
                     dest=buf + write_offset,
-                    src=ptr + self.token_offsets[id],
+                    src=ptr + offs[id],
                     count=n,
                 )
                 write_offset += n
-        # ---- 3. Interpret bytes as UTF-8 (lossy) ------------------------
         var result = String(from_utf8_lossy=Span[UInt8](ptr=buf, length=write_offset))
         buf.free()
         return result^
