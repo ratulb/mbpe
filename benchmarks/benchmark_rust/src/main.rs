@@ -78,11 +78,11 @@ fn main() {
 
     // Decode benchmark
     println!("\n── decode ──");
-    let _ = bpe.decode(tokens.clone()); // warmup
+    let _ = bpe.decode(&tokens); // warmup
     let mut decode_times: Vec<u64> = Vec::with_capacity(n_iters);
     for _ in 0..n_iters {
         let t0 = now_ns();
-        let _ = bpe.decode(tokens.clone());
+        let _ = bpe.decode(&tokens);
         let t1 = now_ns();
         decode_times.push(t1 - t0);
     }
