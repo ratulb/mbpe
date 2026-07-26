@@ -34,7 +34,7 @@ References
 
 from std.pathlib import Path
 from std.python import Python
-from std.memory import alloc, free
+from std.memory import alloc
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 
@@ -203,6 +203,8 @@ struct BPETokenizer(Sized & Movable):
     var merge_cache: PairCache
     var byte_to_cp: Dict[Int, Int]
     var cp_to_byte: Dict[Int, Int]
+    var token_bytes: List[UInt8]
+    var token_offsets: List[Int]
 
     def __init__(out self):
         self.vocab = List[String]()
@@ -210,6 +212,8 @@ struct BPETokenizer(Sized & Movable):
         self.merge_cache = PairCache()
         self.byte_to_cp = Dict[Int, Int]()
         self.cp_to_byte = Dict[Int, Int]()
+        self.token_bytes = List[UInt8]()
+        self.token_offsets = List[Int]()
 
     # ── training ────────────────────────────────────────────────────────
     # The algorithm:
@@ -270,9 +274,17 @@ struct BPETokenizer(Sized & Movable):
         # ---- 3. Initialise vocabulary -----------------------------------
         # IDs 0–255 are the 256 byte values, each mapped to its safe-Unicode
         # representation.  Merge tokens are appended below.
+        # token_bytes/token_offsates form a flat array: token i's bytes are
+        # token_bytes[token_offsets[i]:token_offsets[i+1]].
         self.vocab = List[String](capacity=vocab_size)
+        self.token_bytes = List[UInt8]()
+        self.token_offsets = List[Int](capacity=vocab_size + 1)
         for b in range(256):
-            self.vocab.append(chr(self.byte_to_cp[b]))
+            var display = chr(self.byte_to_cp[b])
+            self.vocab.append(display)
+            self.token_offsets.append(len(self.token_bytes))
+            for cp in display.codepoints():
+                self.token_bytes.append(UInt8(self.cp_to_byte[Int(cp)]))
 
         # ---- 4. Split each word into base token IDs ---------------------
         # Every word is a sequence of raw UTF-8 bytes.  Each byte value is
@@ -320,6 +332,12 @@ struct BPETokenizer(Sized & Movable):
             # the list, and append might reallocate.
             var merged_str = self.vocab[a_id].copy() + self.vocab[b_id].copy()
             self.vocab.append(merged_str)
+            # Append flat byte storage for fast decode.
+            self.token_offsets.append(len(self.token_bytes))
+            for cp in merged_str.codepoints():
+                self.token_bytes.append(UInt8(self.cp_to_byte[Int(cp)]))
+        # Sentinel: last offset equals total byte count.
+        self.token_offsets.append(len(self.token_bytes))
 
     # ── encoding ─────────────────────────────────────────────────────────
     # The encoder uses greedy rank-based merge via PairCache:
@@ -399,26 +417,35 @@ struct BPETokenizer(Sized & Movable):
         return self._tokenize(text)
 
     # ── decoding ─────────────────────────────────────────────────────────
-    # Decode is the inverse of encode:
-    #   1. Look up each token ID in vocab → safe-Unicode display string.
-    #   2. Reverse-map every safe-Unicode codepoint back to its raw byte.
-    #   3. Interpret the byte sequence as UTF-8 (lossy — invalid bytes
-    #      become the U+FFFD replacement character).
-    #   4. Replace the pre-tokeniser's Ġ spacer with regular spaces.
+    # Decode uses precomputed raw bytes per token (token_bytes built during
+    # train/load), avoiding per-codepoint Dict lookups and per-character
+    # iteration on the hot path.  The pre-tokeniser's Ġ spacer (UTF-8 bytes
+    # 0xC4 0xA0) is replaced with space (0x20) at the byte level, avoiding
+    # the cost of a separate string-level replace.
     # ─────────────────────────────────────────────────────────────────────
 
     def decode[mut: Bool, //, origin: Origin[mut=mut]](self, ids: Span[Int, origin]) raises -> String:
         if len(ids) == 0:
             return String("")
-        # ---- 1. Reverse-map token display codepoints → raw bytes --------
-        var byte_list = List[UInt8](capacity=len(ids))
+        # ---- 1. Size the output with one pass over IDs ------------------
+        var total: Int = 0
         for id in ids:
-            for cp in self.vocab[id].codepoints():
-                byte_list.append(UInt8(self.cp_to_byte[Int(cp)]))
-        # ---- 2. Interpret bytes as UTF-8 --------------------------------
-        var decoded = String(from_utf8=Span[UInt8](byte_list))
-        # ---- 3. Restore spaces from the Ġ convention --------------------
-        return StringSlice(decoded).replace("Ġ", " ")
+            total += self.token_offsets[id + 1] - self.token_offsets[id]
+        # ---- 2. Build byte list, replacing Ġ→space inline --------------
+        var out = List[UInt8](capacity=total)
+        for id in ids:
+            var start = self.token_offsets[id]
+            var end = self.token_offsets[id + 1]
+            var r: Int = start
+            while r < end:
+                if r + 1 < end and self.token_bytes[r] == 0xC4 and self.token_bytes[r + 1] == 0xA0:
+                    out.append(UInt8(0x20))
+                    r += 2
+                else:
+                    out.append(self.token_bytes[r])
+                    r += 1
+        # ---- 3. Interpret bytes as UTF-8 (lossy) ------------------------
+        return String(from_utf8=Span[UInt8](out))
 
     def __len__(self) -> Int:
         return len(self.vocab)
@@ -484,8 +511,15 @@ struct BPETokenizer(Sized & Movable):
         # and the merge list).
         var py_vocab = data["vocab"]
         tok.vocab = List[String](capacity=len(py_vocab))
+        tok.token_bytes = List[UInt8]()
+        tok.token_offsets = List[Int](capacity=len(py_vocab) + 1)
         for i in range(len(py_vocab)):
-            tok.vocab.append(String(py_vocab[i]))
+            var display = String(py_vocab[i])
+            tok.vocab.append(display)
+            tok.token_offsets.append(len(tok.token_bytes))
+            for cp in display.codepoints():
+                tok.token_bytes.append(UInt8(tok.cp_to_byte[Int(cp)]))
+        tok.token_offsets.append(len(tok.token_bytes))
 
         # Rebuild ordered merge list.
         var py_merges = data["merges"]
