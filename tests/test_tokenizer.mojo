@@ -1,7 +1,7 @@
 """BPETokenizer test suite.  Run with: mojo -I . tests/test_tokenizer.mojo."""
 
 from tokenizer import BPETokenizer
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_true, TestSuite
 
 
 def test_byte_level_no_unk() raises:
@@ -174,87 +174,4 @@ def test_unicode_roundtrip() raises:
 
 
 def main() raises:
-    """Run every test_* function and report failures."""
-    var failures = 0
-    var total = 0
-
-    total += 1
-    try:
-        test_byte_level_no_unk()
-        print("    PASS  test_byte_level_no_unk")
-    except e:
-        print("    FAIL  test_byte_level_no_unk — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_basic_roundtrip()
-        print("    PASS  test_basic_roundtrip")
-    except e:
-        print("    FAIL  test_basic_roundtrip — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_empty_input()
-        print("    PASS  test_empty_input")
-    except e:
-        print("    FAIL  test_empty_input — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_save_load()
-        print("    PASS  test_save_load")
-    except e:
-        print("    FAIL  test_save_load — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_deterministic()
-        print("    PASS  test_deterministic")
-    except e:
-        print("    FAIL  test_deterministic — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_full_hf_corpus()
-        print("    PASS  test_full_hf_corpus")
-    except e:
-        print("    FAIL  test_full_hf_corpus — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_wikipedia_example()
-        print("    PASS  test_wikipedia_example")
-    except e:
-        print("    FAIL  test_wikipedia_example — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_single_char()
-        print("    PASS  test_single_char")
-    except e:
-        print("    FAIL  test_single_char — " + String(e))
-        failures += 1
-
-    total += 1
-    try:
-        test_unicode_roundtrip()
-        print("    PASS  test_unicode_roundtrip")
-    except e:
-        print("    FAIL  test_unicode_roundtrip — " + String(e))
-        failures += 1
-
-    print("--------")
-    print(
-        "Summary " + String(total) + " tests run: "
-        + String(total - failures) + " passed, "
-        + String(failures) + " failed"
-    )
-    if failures > 0:
-        raise Error("Test suite failed")
+    TestSuite.discover_tests[__functions_in_module()]().run()
