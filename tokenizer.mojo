@@ -344,9 +344,8 @@ struct BPETokenizer(Sized & Movable):
         # ---- 2. Per word: bytes → Ints, greedy rank-based merge ---------
         var result = List[Int]()
         for word in words:
-            var sb = word.as_bytes()
-            var ptr = sb.unsafe_ptr()
-            var n = len(sb)
+            var ptr = word.unsafe_ptr()
+            var n = word.byte_length()
             var start = len(result)
 
             # Reserve space in result (one bulk extension)
