@@ -1,6 +1,7 @@
 """Benchmark comparing three encode approaches."""
 
-from tokenizer import BPETokenizer, PreTokenizer
+from tokenizer import BPETokenizer
+from pretokenizer import GPreTokenizer
 from std.time import perf_counter_ns
 
 
@@ -276,7 +277,7 @@ def encode_baseline(tok: BPETokenizer, text: String) raises -> List[Int]:
 
 def encode_ranked(tok: BPETokenizer, text: String, ref rank: RankTable,
                   ref bytes: TokenBytes) raises -> List[Int]:
-    var words = PreTokenizer.tokenize(text)
+    var words = GPreTokenizer.tokenize(text)
     var result = List[Int]()
     for word in words:
         var word_ids = _encode_word_ranked(tok, word.as_bytes(), rank, bytes)
@@ -285,7 +286,7 @@ def encode_ranked(tok: BPETokenizer, text: String, ref rank: RankTable,
     return result^
 
 def encode_paircache(tok: BPETokenizer, text: String, ref cache: PairCache) raises -> List[Int]:
-    var words = PreTokenizer.tokenize(text)
+    var words = GPreTokenizer.tokenize(text)
     var result = List[Int]()
     for word in words:
         var word_ids = _encode_word_paircache(tok, word.as_bytes(), cache)

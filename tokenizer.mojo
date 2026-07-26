@@ -38,43 +38,7 @@ from std.memory import alloc
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 
-
-# ---------------------------------------------------------------------------
-# Pre-tokeniser — approximates GPT-2's whitespace handling.
-#
-# GPT-2 uses a regex to split on category boundaries (letters vs numbers vs
-# punctuation vs whitespace) so that BPE never merges across them.  Our
-# version is simpler: it replaces each space with " <spacer_byte>" before
-# splitting on spaces, then reinserts the spacer on the front of each word.
-# This approximates the `Ġ` convention used by GPT-2 / tiktoken where a
-# leading Ġ means "this word was preceded by a space".
-#
-# The spacer character (U+0120, Latin capital letter G with inverted breve)
-# was chosen by OpenAI because it almost never appears in real text.
-#
-# Accepts StringSlice (any string view) to avoid forcing callers to own a
-# String.  Returns owned Strings because the words need to outlive the
-# input text (they become dict keys in the caller).
-# ---------------------------------------------------------------------------
-
-struct PreTokenizer:
-    @staticmethod
-    def tokenize[
-        mut: Bool,
-        //,
-        origin: Origin[mut=mut],
-        spacer: StaticString = "Ġ",
-    ](text: StringSlice[origin]) raises -> List[String]:
-        var splits = (
-            text
-            .replace(" ", " " + spacer)
-            .replace(".", " .")
-            .split(" ")
-        )
-        var result = List[String](capacity=len(splits))
-        for split in splits:
-            result.append(String(from_utf8=split.as_bytes()))
-        return result^
+from pretokenizer import PreTokenizer, GPreTokenizer
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +215,8 @@ struct PairCache(ImplicitlyCopyable & Movable):
 #   c) encode() is a simple passthrough — _tokenize returns IDs directly
 # ---------------------------------------------------------------------------
 
-struct BPETokenizer(Sized & Movable):
+struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
+    var pt: Self.PT
     var vocab: List[String]
     var merges: List[MergeRule]
     var merge_cache: PairCache
@@ -262,6 +227,7 @@ struct BPETokenizer(Sized & Movable):
     var token_lengths: List[Int]
 
     def __init__(out self):
+        self.pt = Self.PT()
         self.vocab = List[String]()
         self.merges = List[MergeRule]()
         self.merge_cache = PairCache()
@@ -293,7 +259,7 @@ struct BPETokenizer(Sized & Movable):
         # ---- 1. Pre-tokenise and compute word frequencies ----------------
         var word_freqs = Dict[String, Int]()
         for text in corpus:
-            var words = PreTokenizer.tokenize(text)
+            var words = self.pt.split(text)
             for word in words:
                 word_freqs[word] = 1 + word_freqs.get(word, 0)
 
@@ -435,7 +401,8 @@ struct BPETokenizer(Sized & Movable):
         if text.byte_length() == 0:
             return List[Int]()
         # ---- 1. Pre-tokenise into words ---------------------------------
-        var words = PreTokenizer.tokenize(text)
+        var text_str = String(from_utf8=text.as_bytes())
+        var words = self.pt.split(text_str)
         # ---- 2. Compute total bytes for a single allocation -------------
         var total_bytes = 0
         for word in words:
