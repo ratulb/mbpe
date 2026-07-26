@@ -245,6 +245,12 @@ struct BPETokenizer(Sized & Movable):
             # Printable ranges as defined by GPT-2's encoder.py.
             # Everything else (control chars, whitespace, DEL, soft hyphen)
             # gets a new codepoint ≥ 256.
+            #   0x21..0x7E  — printable ASCII  (!  through ~ )
+            #                  (space 0x20 and DEL 0x7F excluded)
+            #   0xA1..0xAC  — printable Latin-1  (¡  through ¬ )
+            #                  (no-break space 0xA0 excluded)
+            #   0xAE..0xFF  — printable Latin-1  (®  through ÿ )
+            #                  (soft hyphen 0xAD excluded)
             var printable = False
             if b >= 0x21 and b <= 0x7E:
                 printable = True
