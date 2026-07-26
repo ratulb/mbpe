@@ -14,10 +14,13 @@ table avoids dead-rule scans entirely.
 
 **Changes:**
 - Added `PairCache` struct — two-tier cache:
-  - Flat `Int` array (1024×1024, 8 MB) for pairs where both IDs < 1000 —
-    index = `(a << 10) | b`, one shift-or-and + cache-line load.
-  - `Dict[Int, Int]` fallback for IDs ≥ 1000, packed key `(a << 20) | b`.
-  - Sentinal `-1` means "no merge for this pair".
+  - **Fast path:** `UnsafePointer[Int, MutAnyOrigin]` flat array (1024×1024,
+    8 MB heap) for pairs where both IDs < 1000 — index = `(a << 10) | b`,
+    one shift-or-and + raw pointer load.  No bounds check, no ARC overhead.
+    Manual `alloc`/`free` with explicit `__moveinit__` and `__del__`.
+  - **Slow path:** `Dict[Int, Int]` for IDs ≥ 1000, packed key `(a << 20) | b`.
+  - Sentinel `-1` means "no merge for this pair".
+  - `get`/`set` marked `@always_inline`.
 - Added `merge_cache: PairCache` field to `BPETokenizer`.
 - Populated cache in `train()` after each merge rule.
 - Rebuilt cache in `load()` after restoring merges from JSON.
@@ -26,6 +29,7 @@ table avoids dead-rule scans entirely.
   - Apply merge in-place via existing `_merge_inplace_ptr`.
   - Repeat until no mergeable pairs remain.
 - Removed dead helper `_merge_span_to_buf` (no longer needed).
+- Added `from std.memory import alloc, free` import.
 
 **Benchmark (101 KB corpus, 113 merges, vocab 369):**
 
@@ -39,8 +43,8 @@ Integrated version is faster than the external benchmark version because it
 avoids per-word function call overhead and creates no intermediate `List[Int]`.
 
 **Files touched:**
-- `tokenizer.mojo` — PairCache struct, merge_cache field, _tokenize rewrite,
-  train/load cache population.  Removed _merge_span_to_buf.
+- `tokenizer.mojo` — PairCache struct (UnsafePointer), merge_cache field,
+  _tokenize rewrite, train/load cache population.  Removed _merge_span_to_buf.
 - `main.mojo` — no changes (public API unchanged).
 - `CHANGE_LOG.md` — this entry.
 

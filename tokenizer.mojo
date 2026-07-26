@@ -34,6 +34,9 @@ References
 
 from std.pathlib import Path
 from std.python import Python
+from std.memory import alloc, free
+from std.atomic import Atomic, Ordering, fence
+from std.sys import size_of
 
 
 # ---------------------------------------------------------------------------
@@ -90,20 +93,60 @@ comptime CACHE_SIZE: Int = 1000
 comptime CACHE_ENTRIES: Int = 1 << (CACHE_SHIFT * 2)
 comptime ENCODE_SHIFT: Int = 20
 
-struct PairCache(Movable):
-    var _fast: List[Int]
+struct PairCache(ImplicitlyCopyable & Movable):
+    """Reference-counted two-tier merge-lookup cache.
+
+    Layout (one contiguous allocation):
+      [Atomic[UInt64] refcount (8 bytes)]  [Int × CACHE_ENTRIES data (8 MB)]
+      ^-- _refcount                         ^-- _fast
+
+    Copying bumps the refcount — the flat array is shared, not duplicated.
+    The last drop frees the entire block.  _slow is always owned (deep-copied).
+    """
+    var _fast: UnsafePointer[Int, MutAnyOrigin]
+    var _refcount: UnsafePointer[Atomic[DType.uint64], MutAnyOrigin]
     var _slow: Dict[Int, Int]
 
+    comptime REFCOUNT_BYTES: Int = size_of[Atomic[DType.uint64]]()
+    comptime ALLOC_BYTES: Int = size_of[Atomic[DType.uint64]]() + CACHE_ENTRIES * size_of[Int]()
+
     def __init__(out self):
-        self._fast = List[Int](length=CACHE_ENTRIES, fill=-1)
+        var alloc_ptr = alloc[UInt8](Self.ALLOC_BYTES)
+        self._refcount = alloc_ptr.bitcast[Atomic[DType.uint64]]()
+        self._refcount[] = Atomic[DType.uint64](1)
+        self._fast = (alloc_ptr + Self.REFCOUNT_BYTES).bitcast[Int]()
+        for i in range(CACHE_ENTRIES):
+            self._fast[i] = -1
         self._slow = Dict[Int, Int]()
 
+    def __init__(out self, *, copy: Self):
+        """Implement Copyable trait."""
+        self._fast = copy._fast
+        self._refcount = copy._refcount
+        _ = self._refcount[].fetch_add[ordering=Ordering.RELAXED](1)
+        self._slow = copy._slow.copy()
+
+    def __init__(out self, *, deinit move: Self):
+        """Implement Movable trait."""
+        self._fast = move._fast
+        self._fast = move._fast
+        self._refcount = move._refcount
+        self._slow = move._slow^
+
+    def __del__(deinit self):
+        if self._refcount[].fetch_sub[ordering=Ordering.RELEASE](1) != 1:
+            return
+        fence[ordering=Ordering.ACQUIRE]()
+        self._refcount.bitcast[UInt8]().free()
+
+    @always_inline
     def set(mut self, id1: Int, id2: Int, merged_id: Int):
         if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
             self._fast[(id1 << CACHE_SHIFT) | id2] = merged_id
         else:
             self._slow[(id1 << ENCODE_SHIFT) | id2] = merged_id
 
+    @always_inline
     def get(self, id1: Int, id2: Int) -> Int:
         if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
             return self._fast[(id1 << CACHE_SHIFT) | id2]
@@ -128,6 +171,21 @@ struct PairCache(Movable):
 # order, which would apply merge rules in the wrong sequence and generate
 # different token IDs for the same text.  A List preserves insertion order,
 # so the merge sequence is deterministic across save/load cycles.
+#
+# Why keep `merges` when `merge_cache` already provides O(1) lookup?
+# ------------------------------------------------------------------
+#  1. Training record — `train()` appends (a_id, b_id, merged_id) in learn
+#     order.  merged_id = len(vocab) at that point, which IS the rank.
+#     Without `merges` we'd lose what was learned and in what order.
+#  2. Compact serialisation — `save()` writes the merge list as a few KB.
+#     Serialising the 8 MB PairCache flat array instead would bloat every
+#     save file by 4000×.
+#  3. Rebuild from truth — `load()` reconstructs `merge_cache` from
+#     `merges` (a single linear scan).  The merge list is the source of
+#     truth; the cache is a derived structure.
+#
+# Conclusion: `merges` is metadata/serialisation only — not on the encode
+# hot path.  `merge_cache` is the structure that matters for throughput.
 #
 # Why Int IDs instead of strings in the hot loop?
 # -----------------------------------------------
@@ -292,8 +350,9 @@ struct BPETokenizer(Sized & Movable):
             var start = len(result)
 
             # Reserve space in result (one bulk extension)
-            for _ in range(n):
-                result.append(0)
+            _="""for _ in range(n):
+                result.append(0)"""
+            result.resize(start + n, 0)
             var dst = Span(result).unsafe_ptr() + start
 
             # Copy bytes as Ints into result's tail
