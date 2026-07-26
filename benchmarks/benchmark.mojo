@@ -7,6 +7,7 @@ Usage:  mojo -I . -D BPE_PT=N benchmarks/bm.mojo
 from tokenizer import BPETokenizer
 from pretokenizer import PreTokenizer
 from std.pathlib import Path
+from std.os import getenv
 from std.time import perf_counter_ns
 
 
@@ -80,7 +81,8 @@ def run[PT: PreTokenizer](label: String) raises:
     print("  Mojo  — " + label)
     print("=" * 60)
 
-    var corpus = Path("benchmarks/corpus.txt").read_text()
+    var corpus_path = getenv("BPE_CORPUS", "benchmarks/corpus.txt")
+    var corpus = Path(corpus_path).read_text()
     var n_bytes = corpus.byte_length()
     print("Corpus: " + String(n_bytes) + " bytes")
 

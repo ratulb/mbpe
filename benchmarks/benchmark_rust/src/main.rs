@@ -38,14 +38,14 @@ fn main() {
     println!("  tiktoken-rs (Rust)  — GPT-2 BPE encode/decode benchmark");
     println!("{}", "=".repeat(60));
 
-    // Read corpus
-    let corpus_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| {
+    // Read corpus: BPE_CORPUS env var → CLI arg → default
+    let corpus_path = std::env::var("BPE_CORPUS").unwrap_or_else(|_| {
+        std::env::args().nth(1).unwrap_or_else(|| {
             let mut p = std::env::current_dir().unwrap();
             p.push("benchmarks/corpus.txt");
             p.to_string_lossy().to_string()
-        });
+        })
+    });
     let text = std::fs::read_to_string(&corpus_path)
         .expect("Failed to read corpus.txt");
     let n_bytes = text.len();

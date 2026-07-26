@@ -41,6 +41,26 @@ echo ""
 echo "── [3/3] Building Rust benchmark ──"
 (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -2)
 
+# ── Resolve corpus (path or URL) ──────────────────────────────────
+# BPE_CORPUS env var can be a file path or an http(s) URL.
+# If URL, download to a temp file (cleaned up on exit).
+echo ""
+echo "── Corpus ──"
+if [ -z "${BPE_CORPUS:-}" ]; then
+    BPE_CORPUS="$BMDIR/corpus.txt"
+    echo "  default: $BPE_CORPUS"
+elif [[ "$BPE_CORPUS" =~ ^https?:// ]]; then
+    echo "  downloading: $BPE_CORPUS"
+    tmp=$(mktemp /tmp/bpe_corpus.XXXXXX)
+    curl -sL "$BPE_CORPUS" > "$tmp"
+    echo "  saved to: $tmp ($(wc -c < "$tmp") bytes)"
+    trap 'rm -f "$tmp"' EXIT
+    BPE_CORPUS="$tmp"
+else
+    echo "  using: $BPE_CORPUS"
+fi
+export BPE_CORPUS
+
 # ═══════════════════════════════════════════════════════════════════
 echo ""
 echo ""

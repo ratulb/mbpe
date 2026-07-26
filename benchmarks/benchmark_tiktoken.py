@@ -43,9 +43,11 @@ def main():
     print("  tiktoken (Python)  — GPT-2 BPE encode/decode benchmark")
     print("=" * 60)
 
-    # Resolve corpus path relative to this script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    corpus_path = os.path.join(script_dir, "corpus.txt")
+    # Resolve corpus from env var, with fallback
+    corpus_path = os.environ.get("BPE_CORPUS")
+    if corpus_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        corpus_path = os.path.join(script_dir, "corpus.txt")
     with open(corpus_path, "r") as f:
         text = f.read()
     n_bytes = len(text.encode("utf-8"))
