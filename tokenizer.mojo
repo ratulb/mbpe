@@ -347,18 +347,24 @@ struct BPETokenizer(Sized & Movable):
             return List[Int]()
         # ---- 1. Pre-tokenise into words ---------------------------------
         var words = PreTokenizer.tokenize(text)
-        # ---- 2. Per word: bytes → Ints, greedy rank-based merge ---------
+        # ---- 2. Compute total bytes for a single allocation -------------
+        var total_bytes = 0
+        for word in words:
+            total_bytes += word.byte_length()
+        if total_bytes == 0:
+            return List[Int]()
+
+        # ---- 3. Single allocation + per-word merge ----------------------
         var result = List[Int]()
+        result.resize(total_bytes, 0)
+        var write_pos = 0
+
         for word in words:
             var ptr = word.unsafe_ptr()
             var n = word.byte_length()
-            var start = len(result)
+            var dst = result.unsafe_ptr() + write_pos
 
-            # Reserve space in result (one bulk extension)
-            result.resize(start + n, 0)
-            var dst = result.unsafe_ptr() + start
-
-            # Copy bytes as Ints into result's tail
+            # Copy bytes as Ints
             for i in range(n):
                 dst[i] = Int(ptr[i])
 
@@ -379,10 +385,10 @@ struct BPETokenizer(Sized & Movable):
                     break
                 n = _merge_inplace_ptr(dst, n, best_a, best_b, best_m)
 
-            # Trim excess from merge shrinkage
-            while len(result) > start + n:
-                _ = result.pop()
+            write_pos += n
 
+        # Trim to actual used size
+        result.resize(write_pos, 0)
         return result^
 
     def encode[

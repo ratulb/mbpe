@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# runner for simple_bpe benchmarks.
+# Installs dependencies (tiktoken pip package, Rust toolchain) then runs each
+# benchmark and prints a comparison table.
+#
+# Usage:  bash benchmarks/run.sh
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+BMDIR="benchmarks"
+
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  simple_bpe  —  Multi-language Benchmark Suite              ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+
+# ── 1. Install tiktoken (Python pip) ──────────────────────────────
+echo ""
+echo "── [1/3] Installing Python tiktoken ──"
+if python -c "import tiktoken" 2>/dev/null; then
+    echo "  tiktoken already installed"
+else
+    echo "  Installing tiktoken via pip..."
+    pip install tiktoken 2>&1 | tail -1
+fi
+
+# ── 2. Install Rust (if needed) ───────────────────────────────────
+echo ""
+echo "── [2/3] Installing Rust toolchain ──"
+if command -v rustc &>/dev/null; then
+    echo "  Rust $(rustc --version) already installed"
+else
+    echo "  Installing rustup (Rust toolchain installer)..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y 2>&1 | tail -3
+    source "$HOME/.cargo/env"
+    echo "  Rust $(rustc --version) installed"
+fi
+
+# ── 3. Build Rust benchmark ───────────────────────────────────────
+echo ""
+echo "── [3/3] Building Rust benchmark ──"
+(cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -2)
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Running Benchmarks"
+echo "═══════════════════════════════════════════════════════════════"
+
+MOJO_RESULT=$BMDIR/mojo_result.txt
+PY_RESULT=$BMDIR/py_result.txt
+RS_RESULT=$BMDIR/rs_result.txt
+
+# ── Mojo ──────────────────────────────────────────────────────────
+echo ""
+echo "───────────────────────────────────────────────────────────────"
+echo "  1/3  Mojo  (BPETokenizer)"
+echo "───────────────────────────────────────────────────────────────"
+mojo -I . "$BMDIR/benchmark.mojo" 2>&1 | tee "$MOJO_RESULT"
+
+# ── Python tiktoken ───────────────────────────────────────────────
+echo ""
+echo "───────────────────────────────────────────────────────────────"
+echo "  2/3  Python tiktoken"
+echo "───────────────────────────────────────────────────────────────"
+python "$BMDIR/benchmark_tiktoken.py" 2>&1 | tee "$PY_RESULT"
+
+# ── Rust tiktoken-rs ──────────────────────────────────────────────
+echo ""
+echo "───────────────────────────────────────────────────────────────"
+echo "  3/3  Rust tiktoken-rs"
+echo "───────────────────────────────────────────────────────────────"
+"$BMDIR/benchmark_rust/target/release/benchmark_rust" 2>&1 | tee "$RS_RESULT"
+
+# ═══════════════════════════════════════════════════════════════════
+# Extract and compare results
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Results Summary"
+echo "═══════════════════════════════════════════════════════════════"
+
+mojo_enc=$(grep "encode" "$MOJO_RESULT" | head -1 || echo "N/A")
+mojo_dec=$(grep "decode" "$MOJO_RESULT" | head -1 || echo "N/A")
+py_enc=$(grep "encode" "$PY_RESULT" | head -1 || echo "N/A")
+py_dec=$(grep "decode" "$PY_RESULT" | head -1 || echo "N/A")
+rs_enc=$(grep "encode" "$RS_RESULT" | head -1 || echo "N/A")
+rs_dec=$(grep "decode" "$RS_RESULT" | head -1 || echo "N/A")
+
+printf "\n%-22s %-26s %-26s\n" "" "encode (best)" "decode (best)"
+printf "%-22s %-26s %-26s\n" "──────────────────────" "──────────────────────────" "──────────────────────────"
+printf "%-22s %-26s %-26s\n" "Mojo"          "$mojo_enc" "$mojo_dec"
+printf "%-22s %-26s %-26s\n" "tiktoken (Python)" "$py_enc" "$py_dec"
+printf "%-22s %-26s %-26s\n" "tiktoken-rs (Rust)"  "$rs_enc" "$rs_dec"
+echo ""

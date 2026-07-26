@@ -8,3 +8,13 @@
 # scratch / debugging
 debug.mojo
 outputs/
+
+# benchmark build artifacts
+benchmarks/benchmark_rust/target/
+
+# benchmark output files
+benchmarks/*_result.txt
+
+# Python cache
+__pycache__/
+*.pyc
