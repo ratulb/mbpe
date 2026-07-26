@@ -229,7 +229,7 @@ struct BPETokenizer(Sized & Movable):
     # (every word has been reduced to a single token).
     # ─────────────────────────────────────────────────────────────────────
 
-    def train(mut self, corpus: List[String], vocab_size: Int) raises:
+    def train[mut: Bool, //, origin: Origin[mut=mut]](mut self, corpus: Span[String, origin], vocab_size: Int) raises:
         # ---- 1. Pre-tokenise and compute word frequencies ----------------
         var word_freqs = Dict[String, Int]()
         for text in corpus:
@@ -350,10 +350,8 @@ struct BPETokenizer(Sized & Movable):
             var start = len(result)
 
             # Reserve space in result (one bulk extension)
-            _="""for _ in range(n):
-                result.append(0)"""
             result.resize(start + n, 0)
-            var dst = Span(result).unsafe_ptr() + start
+            var dst = result.unsafe_ptr() + start
 
             # Copy bytes as Ints into result's tail
             for i in range(n):
@@ -398,19 +396,18 @@ struct BPETokenizer(Sized & Movable):
     #   4. Replace the pre-tokeniser's Ġ spacer with regular spaces.
     # ─────────────────────────────────────────────────────────────────────
 
-    def decode(self, ids: List[Int]) raises -> String:
+    def decode[mut: Bool, //, origin: Origin[mut=mut]](self, ids: Span[Int, origin]) raises -> String:
         if len(ids) == 0:
             return String("")
-        # ---- 1. Concatenate token display strings -----------------------
-        var raw = StringSlice("").join([self.vocab[i] for i in ids])
-        # ---- 2. Reverse-map safe codepoints → raw bytes -----------------
-        var byte_list = List[UInt8](capacity=raw.byte_length())
-        for cp in raw.codepoints():
-            byte_list.append(UInt8(self.cp_to_byte[Int(cp)]))
-        # ---- 3. Interpret bytes as UTF-8 --------------------------------
-        var decoded = String(from_utf8_lossy=Span[UInt8](byte_list))
-        # ---- 4. Restore spaces from the Ġ convention --------------------
-        return String(StringSlice(decoded).replace("Ġ", " "))
+        # ---- 1. Reverse-map token display codepoints → raw bytes --------
+        var byte_list = List[UInt8](capacity=len(ids))
+        for id in ids:
+            for cp in self.vocab[id].codepoints():
+                byte_list.append(UInt8(self.cp_to_byte[Int(cp)]))
+        # ---- 2. Interpret bytes as UTF-8 --------------------------------
+        var decoded = String(from_utf8=Span[UInt8](byte_list))
+        # ---- 3. Restore spaces from the Ġ convention --------------------
+        return StringSlice(decoded).replace("Ġ", " ")
 
     def __len__(self) -> Int:
         return len(self.vocab)
@@ -540,7 +537,7 @@ def _compute_pair_freqs(
     """
     var pair_freqs = Dict[Tuple[Int, Int], Int]()
     for word_freq in word_freqs.items():
-        var word = word_freq.key
+        ref word = word_freq.key
         var freq = word_freq.value
         ref split = splits[word]
         if len(split) == 1:

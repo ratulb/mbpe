@@ -35,7 +35,13 @@ All commands run inside `pixi shell` or prefixed with `pixi run`:
   - `_tokenize` returns `List[Int]` directly; `encode` is a passthrough
 - Strings materialised only when needed: `vocab: List[String]` for decode,
   vocab-string concatenation for new merge entries, save/load.
-- `encode(String) -> List[Int]`, `decode(List[Int]) -> String` (replaces `Ġ`
+- `encode(String) -> List[Int]`, `decode(Span[Int]) -> String` (replaces `Ġ`
   with space on decode).
 - `Sized` trait enabled (`len(tok)` works). `Movable` for `^` transfer.
 - Project history tracked in `CHANGE_LOG.md` (append-only, dated entries).
+
+## Mojo conventions
+
+- **Prefer `Span` over `List` in function parameters** — Span is a borrowed
+  view and never copies the data.  `List[T]` converts to `Span[T]` implicitly
+  via `__as_span`, so callers can pass either without extra work.
