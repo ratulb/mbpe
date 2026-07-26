@@ -37,6 +37,7 @@ from std.python import Python
 from std.memory import alloc, memcpy
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
+from std.base64 import b64encode, b64decode
 
 from pretokenizer import PreTokenizer, GPreTokenizer
 
@@ -110,6 +111,8 @@ comptime CACHE_SHIFT: Int = 10
 comptime CACHE_SIZE: Int = 1000
 comptime CACHE_ENTRIES: Int = 1 << (CACHE_SHIFT * 2)
 comptime ENCODE_SHIFT: Int = 20
+comptime ENCODE_MASK: Int = (1 << ENCODE_SHIFT) - 1
+comptime SEP: Int = -1
 
 struct PairCache(ImplicitlyCopyable & Movable):
     """Reference-counted two-tier merge-lookup cache.
@@ -236,6 +239,24 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         self.token_bytes = List[UInt8]()
         self.token_offsets = List[Int]()
         self.token_lengths = List[Int]()
+        # GPT-2 bytes_to_unicode mapping (fixed at init, used by all methods)
+        var n = 0
+        for b in range(256):
+            var printable = False
+            if b >= 0x21 and b <= 0x7E:
+                printable = True
+            elif b >= 0xA1 and b <= 0xAC:
+                printable = True
+            elif b >= 0xAE and b <= 0xFF:
+                printable = True
+            if printable:
+                self.byte_to_cp[b] = b
+                self.cp_to_byte[b] = b
+            else:
+                var cp = 256 + n
+                self.byte_to_cp[b] = cp
+                self.cp_to_byte[cp] = b
+                n += 1
 
     # ── training ────────────────────────────────────────────────────────
     # The algorithm:
@@ -264,34 +285,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
                 word_freqs[word] = 1 + word_freqs.get(word, 0)
 
         # ---- 2. Build byte ↔ safe-Unicode mapping -----------------------
-        self.byte_to_cp = Dict[Int, Int]()
-        self.cp_to_byte = Dict[Int, Int]()
-        var n = 0
-        for b in range(256):
-            # Printable ranges as defined by GPT-2's encoder.py.
-            # Everything else (control chars, whitespace, DEL, soft hyphen)
-            # gets a new codepoint ≥ 256.
-            #   0x21..0x7E  — printable ASCII  (!  through ~ )
-            #                  (space 0x20 and DEL 0x7F excluded)
-            #   0xA1..0xAC  — printable Latin-1  (¡  through ¬ )
-            #                  (no-break space 0xA0 excluded)
-            #   0xAE..0xFF  — printable Latin-1  (®  through ÿ )
-            #                  (soft hyphen 0xAD excluded)
-            var printable = False
-            if b >= 0x21 and b <= 0x7E:
-                printable = True
-            elif b >= 0xA1 and b <= 0xAC:
-                printable = True
-            elif b >= 0xAE and b <= 0xFF:
-                printable = True
-            if printable:
-                self.byte_to_cp[b] = b
-                self.cp_to_byte[b] = b
-            else:
-                var cp = 256 + n
-                self.byte_to_cp[b] = cp
-                self.cp_to_byte[cp] = b
-                n += 1
+        # (initialized in __init__ — nothing to do here)
 
         # ---- 3. Initialise vocabulary -----------------------------------
         # IDs 0–255 are the 256 byte values, each mapped to its safe-Unicode
@@ -310,55 +304,104 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
                 self.token_bytes.append(UInt8(self.cp_to_byte[Int(cp)]))
             self.token_lengths.append(len(self.token_bytes) - self.token_offsets[b])
 
-        # ---- 4. Split each word into base token IDs ---------------------
-        # Every word is a sequence of raw UTF-8 bytes.  Each byte value is
-        # its own token ID (0x00 → 0, 0x01 → 1, ..., 0xFF → 255).
-        var splits = Dict[String, List[Int]]()
-        for word in word_freqs.keys():
+        # ---- 4. Build flat token-ID sequence with SEP sentinel ------------
+        # Flatten the word-frequency structure into a single List[Int] with
+        # SEP separators between words.  Each word appears `freq` times to
+        # preserve frequency weighting.  Tokens are byte values 0-255.
+        var ids = List[Int]()
+        for item in word_freqs.items():
+            var word = item.key
+            var freq = item.value
             var sb = word.as_bytes()
-            var ids = List[Int](capacity=len(sb))
-            for i in range(len(sb)):
-                ids.append(Int(sb[i]))
-            splits[word] = ids^
+            for _ in range(freq):
+                if len(ids) > 0:
+                    ids.append(SEP)
+                for i in range(len(sb)):
+                    ids.append(Int(sb[i]))
 
-        # ---- 5. Merge loop ----------------------------------------------
-        # Each iteration finds the most frequent adjacent pair across all
-        # words and replaces every occurrence with a single new token.
+        # ---- 5. Count initial pair frequencies (one pass) -----------------
+        # Pairs involving SEP are skipped (they can never be merged).
+        var stats = Dict[Int, Int]()
+        for i in range(len(ids) - 1):
+            if ids[i] != SEP and ids[i + 1] != SEP:
+                var key = (ids[i] << ENCODE_SHIFT) | ids[i + 1]
+                stats[key] = stats.get(key, 0) + 1
+
+        # ---- 6. Merge loop (incremental pair stats) -----------------------
+        # Each iteration finds the most frequent pair, applies the merge via
+        # a single scan of `ids`, and updates `stats` incrementally (only
+        # the 5 pairs affected per occurrence are adjusted).
         self.merges = List[MergeRule]()
         while len(self.vocab) < vocab_size:
-            # Count how often each pair of adjacent token-IDs appears.
-            var pair_freqs = _compute_pair_freqs(splits, word_freqs)
-            if len(pair_freqs) == 0:
-                # No pairs left to merge — every word is a single token.
-                break
-
-            # Pick the pair with the highest frequency.
+            # Find the most frequent pair that does not involve SEP.
             var best_pair: Tuple[Int, Int] = (0, 0)
             var max_freq = -1
-            for pair_freq in pair_freqs.items():
-                var pair = pair_freq.key
-                var freq = pair_freq.value
-                if max_freq == -1 or max_freq < freq:
-                    best_pair = pair
-                    max_freq = freq
+            for item in stats.items():
+                if item.value > max_freq:
+                    var a = item.key >> ENCODE_SHIFT
+                    var b = item.key & ENCODE_MASK
+                    if a != SEP and b != SEP:
+                        max_freq = item.value
+                        best_pair = (a, b)
+            if max_freq <= 0:
+                break
 
-            # Apply the merge and record it.
-            var merged_id = len(self.vocab)
             var a_id = best_pair[0]
             var b_id = best_pair[1]
-            _merge_pair(a_id, b_id, merged_id, splits, word_freqs)
-            # Store in order so encoding always applies merges in the same
-            # sequence they were learned.
+            var merged_id = len(self.vocab)
+
+            # Single scan: apply merge + update stats incrementally.
+            var new_ids = List[Int](capacity=len(ids))
+            var i = 0
+            while i < len(ids):
+                if ids[i] == SEP:
+                    new_ids.append(SEP)
+                    i += 1
+                elif (
+                    i < len(ids) - 1
+                    and ids[i + 1] != SEP
+                    and ids[i] == a_id
+                    and ids[i + 1] == b_id
+                ):
+                    # Decrement destroyed pairs: (prev, a), (a, b), (b, next)
+                    if len(new_ids) > 0 and new_ids[len(new_ids) - 1] != SEP:
+                        var pk = (new_ids[len(new_ids) - 1] << ENCODE_SHIFT) | ids[i]
+                        if pk in stats:
+                            var nv = stats[pk] - 1
+                            stats[pk] = nv if nv > 0 else 0
+                    var mk = (ids[i] << ENCODE_SHIFT) | ids[i + 1]
+                    if mk in stats:
+                        var nv = stats[mk] - 1
+                        stats[mk] = nv if nv > 0 else 0
+                    if i + 2 < len(ids) and ids[i + 2] != SEP:
+                        var nk = (ids[i + 1] << ENCODE_SHIFT) | ids[i + 2]
+                        if nk in stats:
+                            var nv = stats[nk] - 1
+                            stats[nk] = nv if nv > 0 else 0
+
+                    # Increment created pairs: (prev, new_id), (new_id, next)
+                    if len(new_ids) > 0 and new_ids[len(new_ids) - 1] != SEP:
+                        var pk2 = (new_ids[len(new_ids) - 1] << ENCODE_SHIFT) | merged_id
+                        stats[pk2] = stats.get(pk2, 0) + 1
+                    if i + 2 < len(ids) and ids[i + 2] != SEP:
+                        var nk2 = (merged_id << ENCODE_SHIFT) | ids[i + 2]
+                        stats[nk2] = stats.get(nk2, 0) + 1
+
+                    new_ids.append(merged_id)
+                    i += 2
+                else:
+                    new_ids.append(ids[i])
+                    i += 1
+
+            ids = new_ids^
+
+            # Record the merge.
             self.merges.append(MergeRule(a_id, b_id, merged_id))
             self.merge_cache.set(a_id, b_id, merged_id)
-            # The display string is the concatenation of the two parts.
-            # We copy to avoid aliasing: self.vocab[a_id] is a view into
-            # the list, and append might reallocate.
+
+            # Build display string and flat byte storage.
             var merged_str = self.vocab[a_id].copy() + self.vocab[b_id].copy()
             self.vocab.append(merged_str)
-            # Flat byte storage for fast decode.
-            # Replace Ġ (0xC4, 0xA0) with 0x20 inline so decode is a
-            # straight byte copy with no substitution branch.
             self.token_offsets.append(len(self.token_bytes))
             var pending: Int = -1
             for cp in merged_str.codepoints():
@@ -585,6 +628,202 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
 
         return tok^
 
+    # ── .tiktoken format support ──────────────────────────────────────
+
+    @staticmethod
+    def _bytes_key(bytes: Span[UInt8, _]) -> String:
+        var key = String(capacity=len(bytes) * 4)
+        for i in range(len(bytes)):
+            if i > 0:
+                key += ","
+            key += String(Int(bytes[i]))
+        return key^
+
+    @staticmethod
+    def _bpe(
+        mergeable_ranks: Dict[String, Int],
+        token_bytes: Span[UInt8, _],
+        max_rank: Int,
+    ) raises -> List[List[UInt8]]:
+        var parts = List[List[UInt8]](capacity=len(token_bytes))
+        for i in range(len(token_bytes)):
+            var single = List[UInt8](capacity=1)
+            single.append(token_bytes[i])
+            parts.append(single^)
+
+        while True:
+            var min_idx = -1
+            var min_rank = -1
+            for i in range(len(parts) - 1):
+                var concat = List[UInt8](
+                    capacity=len(parts[i]) + len(parts[i + 1])
+                )
+                for j in range(len(parts[i])):
+                    concat.append(parts[i][j])
+                for j in range(len(parts[i + 1])):
+                    concat.append(parts[i + 1][j])
+                var key = BPETokenizer._bytes_key(Span[UInt8](concat))
+                if key in mergeable_ranks:
+                    var rank = mergeable_ranks[key]
+                    if min_idx < 0 or rank < min_rank:
+                        min_idx = i
+                        min_rank = rank
+            if min_idx < 0 or (max_rank >= 0 and min_rank >= max_rank):
+                break
+
+            var merged = List[UInt8](
+                capacity=len(parts[min_idx]) + len(parts[min_idx + 1])
+            )
+            for j in range(len(parts[min_idx])):
+                merged.append(parts[min_idx][j])
+            for j in range(len(parts[min_idx + 1])):
+                merged.append(parts[min_idx + 1][j])
+            var new_parts = List[List[UInt8]](capacity=len(parts) - 1)
+            for j in range(min_idx):
+                new_parts.append(parts[j].copy())
+            new_parts.append(merged^)
+            for j in range(min_idx + 2, len(parts)):
+                new_parts.append(parts[j].copy())
+            parts = new_parts^
+        return parts^
+
+    def _recover_merges(
+        mut self,
+        mergeable_ranks: Dict[String, Int],
+        all_tokens: List[List[UInt8]],
+    ) raises:
+        var size = len(all_tokens)
+        var recovered = List[MergeRule]()
+        for token_id in range(256, size):
+            var token_bytes = all_tokens[token_id].copy()
+            var n = len(token_bytes)
+            if n <= 1:
+                continue
+            var parts = self._bpe(
+                mergeable_ranks, Span[UInt8](token_bytes), token_id
+            )
+            var left_id = -1
+            var right_id = -1
+
+            if len(parts) == 2:
+                var lk = BPETokenizer._bytes_key(Span[UInt8](parts[0]))
+                var rk = BPETokenizer._bytes_key(Span[UInt8](parts[1]))
+                if lk in mergeable_ranks and rk in mergeable_ranks:
+                    left_id = mergeable_ranks[lk]
+                    right_id = mergeable_ranks[rk]
+            elif len(parts) > 2:
+                var best_cr = -1
+                for i in range(len(parts) - 1):
+                    var concat = List[UInt8](
+                        capacity=len(parts[i]) + len(parts[i + 1])
+                    )
+                    for k in range(len(parts[i])):
+                        concat.append(parts[i][k])
+                    for k in range(len(parts[i + 1])):
+                        concat.append(parts[i + 1][k])
+                    var ck = BPETokenizer._bytes_key(Span[UInt8](concat))
+                    if ck in mergeable_ranks:
+                        var cr = mergeable_ranks[ck]
+                        if cr < token_id and cr > best_cr:
+                            var lk2 = BPETokenizer._bytes_key(
+                                Span[UInt8](parts[i])
+                            )
+                            var rk2 = BPETokenizer._bytes_key(
+                                Span[UInt8](parts[i + 1])
+                            )
+                            if (
+                                lk2 in mergeable_ranks
+                                and rk2 in mergeable_ranks
+                            ):
+                                var lr = mergeable_ranks[lk2]
+                                var rr = mergeable_ranks[rk2]
+                                if lr < token_id and rr < token_id:
+                                    best_cr = cr
+                                    left_id = lr
+                                    right_id = rr
+            if left_id >= 0 and right_id >= 0:
+                recovered.append(
+                    MergeRule(left_id, right_id, token_id)
+                )
+        self.merges = recovered^
+
+    def save_tiktoken(mut self, path: String) raises:
+        with open(path, "w") as f:
+            for token_id in range(len(self.vocab)):
+                var raw = List[UInt8](capacity=4)
+                var display = self.vocab[token_id]
+                for cp in display.codepoints():
+                    raw.append(UInt8(self.cp_to_byte[Int(cp)]))
+                var encoded = b64encode(Span[UInt8](raw))
+                f.write(encoded + " " + String(token_id) + "\n")
+
+    def load_tiktoken(mut self, path: String) raises:
+        var file_content: String
+        with open(path, "r") as f:
+            file_content = f.read()
+        var raw_lines = file_content.split("\n")
+
+        var mergeable_ranks = Dict[String, Int]()
+        var all_tokens = List[List[UInt8]]()
+        var max_id = 0
+
+        for line_ptr in raw_lines:
+            var line = String(line_ptr.strip())
+            if line.byte_length() == 0:
+                continue
+            var parts = line.split(" ")
+            var raw = b64decode(parts[0])
+            var rank = Int(parts[1])
+            var key = BPETokenizer._bytes_key(Span[UInt8](raw))
+            mergeable_ranks[key] = rank
+            while len(all_tokens) <= rank:
+                all_tokens.append(List[UInt8]())
+            all_tokens[rank] = raw^
+            if rank > max_id:
+                max_id = rank
+
+        var new_vocab_size = max_id + 1
+        var new_vocab = List[String](capacity=new_vocab_size)
+        var new_token_bytes = List[UInt8]()
+        var new_token_offsets = List[Int](capacity=new_vocab_size + 1)
+        var new_token_lengths = List[Int](capacity=new_vocab_size)
+        for token_id in range(new_vocab_size):
+            var raw_bytes = Span[UInt8](all_tokens[token_id])
+            var display = String(capacity=len(raw_bytes) * 3)
+            for i in range(len(raw_bytes)):
+                display += chr(self.byte_to_cp[Int(raw_bytes[i])])
+            new_vocab.append(display)
+            new_token_offsets.append(len(new_token_bytes))
+            var pending: Int = -1
+            for cp in display.codepoints():
+                var b = self.cp_to_byte[Int(cp)]
+                if b == 0xA0 and pending == 0xC4:
+                    new_token_bytes.append(UInt8(0x20))
+                    pending = -1
+                else:
+                    if pending >= 0:
+                        new_token_bytes.append(UInt8(pending))
+                    pending = b
+            if pending >= 0:
+                new_token_bytes.append(UInt8(pending))
+            new_token_lengths.append(
+                len(new_token_bytes)
+                - new_token_offsets[len(new_token_offsets) - 1]
+            )
+        new_token_offsets.append(len(new_token_bytes))
+
+        self._recover_merges(mergeable_ranks, all_tokens)
+
+        var new_merge_cache = PairCache()
+        for merge in self.merges:
+            new_merge_cache.set(merge.first, merge.second, merge.merged)
+
+        self.vocab = new_vocab^
+        self.token_bytes = new_token_bytes^
+        self.token_offsets = new_token_offsets^
+        self.token_lengths = new_token_lengths^
+        self.merge_cache = new_merge_cache^
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Hot-path helpers — raw pointer operations, zero allocations
@@ -615,69 +854,6 @@ def _merge_inplace_ptr(
     return w
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Module-level helpers
-# ═══════════════════════════════════════════════════════════════════════════
-#
-# These are separate functions rather than methods because they take mutable
-# references to the splits dictionary and don't need access to the tokenizer
-# struct's fields.
-
-def _compute_pair_freqs(
-    splits: Dict[String, List[Int]], word_freqs: Dict[String, Int]
-) raises -> Dict[Tuple[Int, Int], Int]:
-    """Count how often each adjacent pair of token-IDs appears in the corpus.
-
-    For each word, look at its current token-ID split and tally every pair
-    of adjacent IDs weighted by the word's frequency.  Words that are already
-    a single token are skipped (no pairs to count).
-    """
-    var pair_freqs = Dict[Tuple[Int, Int], Int]()
-    for word_freq in word_freqs.items():
-        ref word = word_freq.key
-        var freq = word_freq.value
-        ref split = splits[word]
-        if len(split) == 1:
-            continue
-        for i in range(len(split) - 1):
-            var pair = (split[i], split[i + 1])
-            pair_freqs[pair] = pair_freqs.get(pair, 0) + freq
-    return pair_freqs^
 
 
-def _merge_pair(
-    a_id: Int,
-    b_id: Int,
-    merged_id: Int,
-    mut splits: Dict[String, List[Int]],
-    word_freqs: Dict[String, Int],
-) raises:
-    """Replace every occurrence of (a_id, b_id) with merged_id.
 
-    For every word in the corpus, scan its token-ID list.  When the pair
-    (a_id, b_id) is found, replace the pair with merged_id and do NOT
-    advance the scan position — the newly inserted token might itself be
-    the left half of another match at the same position.
-
-    This function mutates `splits` in place.  The final `.copy()` ensures
-    the dict entry is an owned value (the intermediate list comprehensions
-    may create references).
-    """
-    for word in word_freqs:
-        ref split = splits[word]
-        if len(split) == 1:
-            continue
-        var i = 0
-        while i < len(split) - 1:
-            if split[i] == a_id and split[i + 1] == b_id:
-                # Rebuild the split: elements before the pair + merged
-                # token + elements after the pair.  i stays the same so
-                # we can immediately check (merged_id, split[i+1]).
-                split = (
-                    [e for e in split[:i]]
-                    + [merged_id]
-                    + [e for e in split[i + 2:]]
-                )
-            else:
-                i += 1
-        splits[word] = split.copy()
