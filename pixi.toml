@@ -4,6 +4,7 @@ name = "simple_bpe"
 platforms = ["linux-64"]
 version = "0.1.0"
 
+# BPE_PT selects the pre-tokenizer: default/gpt2/gpt4 → -D BPE_PT=0/1/2
 [tasks]
 benchmark = "bash benchmarks/run.sh"
 benchmark-gpt2 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt2" } }

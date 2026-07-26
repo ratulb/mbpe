@@ -52,11 +52,12 @@ MOJO_RESULT=$BMDIR/mojo_result.txt
 PY_RESULT=$BMDIR/py_result.txt
 RS_RESULT=$BMDIR/rs_result.txt
 
-# ── Select Mojo entry point based on BPE_PT ──────────────────────
-case "${BPE_PT:-}" in
-  gpt2) MOJO_ENTRY="bm_gpt2.mojo"; MOJO_LABEL="BPETokenizer[GPT2Pretokenizer]" ;;
-  gpt4) MOJO_ENTRY="bm_gpt4.mojo"; MOJO_LABEL="BPETokenizer[GPT4Pretokenizer]" ;;
-  *)    MOJO_ENTRY="bm_default.mojo"; MOJO_LABEL="BPETokenizer[GPreTokenizer]" ;;
+# ── Select pre-tokenizer via -D BPE_PT=N comptime flag ───────────
+#   N=0: GPreTokenizer (default)   N=1: GPT2Pretokenizer   N=2: GPT4Pretokenizer
+case "${BPE_PT:-default}" in
+  gpt2|1) BPE_VAL=1; MOJO_LABEL="BPETokenizer[GPT2Pretokenizer]" ;;
+  gpt4|2) BPE_VAL=2; MOJO_LABEL="BPETokenizer[GPT4Pretokenizer]" ;;
+  *)      BPE_VAL=0; MOJO_LABEL="BPETokenizer[GPreTokenizer]" ;;
 esac
 
 # ── Mojo ──────────────────────────────────────────────────────────
@@ -64,7 +65,7 @@ echo ""
 echo "───────────────────────────────────────────────────────────────"
 echo "  1/3  Mojo  ($MOJO_LABEL)"
 echo "───────────────────────────────────────────────────────────────"
-mojo -I . "$BMDIR/$MOJO_ENTRY" 2>&1 | tee "$MOJO_RESULT"
+mojo -I . -D BPE_PT=$BPE_VAL "$BMDIR/bm.mojo" 2>&1 | tee "$MOJO_RESULT"
 
 # ── Python tiktoken ───────────────────────────────────────────────
 echo ""

@@ -1,10 +1,11 @@
 """Shared benchmark helpers — parameterized by pre-tokenizer type.
 
-Dispatch entry points: bm_default.mojo, bm_gpt2.mojo, bm_gpt4.mojo
+Usage:  mojo -I . -D BPE_PT=N benchmarks/bm.mojo
+  N=0: GPreTokenizer   N=1: GPT2Pretokenizer   N=2: GPT4Pretokenizer
 """
 
 from tokenizer import BPETokenizer
-from pretokenizer import PreTokenizer, GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer
+from pretokenizer import PreTokenizer
 from std.pathlib import Path
 from std.time import perf_counter_ns
 
@@ -74,18 +75,9 @@ def fmt_tok_s(tokens: Int, ns: Int) -> String:
         return String(per_sec) + " tok/s"
 
 
-def fmt_name(prefix: String) -> String:
-    if prefix == "gpt2":
-        return "BPETokenizer[GPT2Pretokenizer]"
-    elif prefix == "gpt4":
-        return "BPETokenizer[GPT4Pretokenizer]"
-    else:
-        return "BPETokenizer[GPreTokenizer]"
-
-
-def run[PT: PreTokenizer = GPreTokenizer](prefix: String) raises:
+def run[PT: PreTokenizer](label: String) raises:
     print("=" * 60)
-    print("  Mojo  — " + fmt_name(prefix))
+    print("  Mojo  — " + label)
     print("=" * 60)
 
     var corpus = Path("benchmarks/corpus.txt").read_text()

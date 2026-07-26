@@ -9,6 +9,10 @@ on a corpus, then tokenizes new text using learned merges.
 
 All commands run inside `pixi shell` or prefixed with `pixi run`:
 - **Run**: `mojo main.mojo`
+- **Benchmark**: `pixi run benchmark` (GPreTokenizer), `pixi run benchmark-gpt2` (GPT2),
+  `pixi run benchmark-gpt4` (GPT4).  Uses `-D BPE_PT=N` comptime flags
+  (`from std.sys.defines import get_defined_int`) to select pre-tokenizer variant
+  from a single entry point `benchmarks/bm.mojo`.
 - **No test framework, linter, formatter, or typechecker** configured. No CI.
 
 ## Environment
@@ -23,8 +27,12 @@ All commands run inside `pixi shell` or prefixed with `pixi run`:
 ## Architecture
 
 - `tokenizer.mojo` — `BPETokenizer` struct with `train()`/`encode()`/`decode()`,
-  `save()`/`load()`. Also contains `PreTokenizer` and module-level helper
-  functions `_compute_pair_freqs`, `_merge_pair`.
+  `save()`/`load()`. Module-level helpers `_compute_pair_freqs`, `_merge_pair`.
+  Parameterized with `PT: PreTokenizer` — `BPETokenizer[GPreTokenizer]` default.
+- `pretokenizer.mojo` — `PreTokenizer` trait + three implementations:
+  `GPreTokenizer` (Ġ), `GPT2Pretokenizer` (r50k_base), `GPT4Pretokenizer` (cl100k_base).
+  Pre-tokenizer type selected at compile time via `-D BPE_PT=N`.
+- `benchmarks/bm.mojo` — single entry point dispatches via `get_defined_int["BPE_PT", 0]()`.
 - `main.mojo` — tests via `TestSuite.discover_tests` (std.testing).
 - Pre-tokenizer approximates GPT-2's `Ġ` convention (space → `Ġ` prefix).
 - Character-level base vocab with `<UNK>` at ID 0 (unknown codepoints → 0).
@@ -39,6 +47,15 @@ All commands run inside `pixi shell` or prefixed with `pixi run`:
   with space on decode).
 - `Sized` trait enabled (`len(tok)` works). `Movable` for `^` transfer.
 - Project history tracked in `CHANGE_LOG.md` (append-only, dated entries).
+
+## Pretokenization
+
+Our `PreTokenizer` uses the `Ġ` convention (space → `Ġ` prefix, decode
+reverses). tiktoken instead uses a regex-based split that keeps whitespace
+inline. A pure-Mojo UTF-8 state machine exists in `../bpe.mojo/bpe/pretokenizer.mojo`
+but implements the cl100k_base pattern, not GPT-2's r50k_base.
+
+**See `PRETOKENIZER.md` for the full analysis and migration plan.**
 
 ## Mojo conventions
 
