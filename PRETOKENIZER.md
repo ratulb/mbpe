@@ -77,32 +77,18 @@ deviations from the GPT-2 tokenizer that our project targets:
    GPT-2 has no such limit. This is the most visible difference for numeric
    text.
 
-## Plan to Match GPT-2 / tiktoken Exactly
+## Implementation Status
 
-To bring our pretokenizer into lock step with tiktoken's GPT-2 pattern, we need to:
+✅ **GPT2Pretokenizer** (`pretokenizer.mojo:712+`) implements all 7 GPT-2 pattern alternatives as hand-written UTF-8 matchers. The bpe.mojo pretokenizer (cl100k_base) was adapted to match GPT-2's r50k_base exactly:
+- Case-sensitive contractions (`'(?:[sdmt]|ll|ve|re)`)
+- ` ?\p{L}++` — optional space + Unicode letters
+- ` ?\p{N}++` — optional space + digits, no max
+- ` ?[^\s\p{L}\p{N}]++` — optional space + punctuation (no trailing newlines)
+- `\s++$` — trailing whitespace at EOF only
+- `\s+(?!\S)` — whitespace not followed by non-space (byte-level lookahead)
+- `\s` — single whitespace fallback
 
-1. **Rewrite `_match_letter_run`** for ` ?\p{L}++`:
-   - Optional ASCII space (byte 0x20) before letter run
-   - Not `[^\r\n\p{L}\p{N}]?` prefix
+✅ **GPT4Pretokenizer** (`pretokenizer.mojo:1007+`) retains the cl100k_base pattern from bpe.mojo (case-insensitive contractions, 3-digit max, newline rule, etc.).
 
-2. **Rewrite `_match_digit_run`** for ` ?\p{N}++`:
-   - Optional ASCII space before digit run
-   - No max length (or large enough to never truncate practical input)
-   - Possessive (greedy is equivalent here)
-
-3. **Rewrite `_match_punct_run`** for ` ?[^\s\p{L}\p{N}]++`:
-   - Remove trailing `[\r\n]*`
-
-4. **Rewrite `_match_newline` → remove** (not in GPT-2 pattern)
-
-5. **Rewrite `_match_whitespace`** with three sub-matchers for alternatives 5-7:
-   - `\s++$` — whitespace at EOF only
-   - `\s+(?!\S)` — whitespace not followed by non-space (approximate via byte lookahead)
-   - `\s` — single whitespace fallback
-
-6. **Remove `{\L}` lookahead commentary** — contractions should be case-sensitive
-   for GPT-2 (GPT-4 adds `(?i:...)`).
-
-After this, the pretokenizer split output will match tiktoken exactly, and we
-can drop the `Ġ` convention entirely, eliminating the decode substitution
-branch naturally (it's already gone via pre-substitution in `token_bytes`).
+With these matchers the pretokenizer split output matches tiktoken exactly, and
+the `Ġ` convention is no longer needed — decode is a direct byte concatenation.

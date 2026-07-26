@@ -442,10 +442,12 @@ and rebuilding the entire pair-freq dict.
 
 ---
 
-## Relationship to bpe.mojo
+## Implementation Status
 
-The algorithm described here is a port of `bpe.mojo/bpe/basic_tokenizer.mojo`
-(lines 114–230) adapted for our `BPETokenizer[PT]` architecture. Key differences:
+✅ **Fully implemented** in `tokenizer.mojo:349-439` (`train()` method).
+
+The algorithm described in this document was ported from `bpe.mojo/bpe/basic_tokenizer.mojo`
+(lines 114–230) and adapted for our `BPETokenizer[PT]` architecture. Key differences from bpe.mojo:
 
 | Aspect | bpe.mojo | Our adaptation |
 |---|---|---|
