@@ -78,6 +78,60 @@ struct PreTokenizer:
 
 
 # ---------------------------------------------------------------------------
+# MergeRule — a BPE merge: (a_id, b_id, merged_id)
+#
+# Replaces raw Tuple[Int, Int, Int] with named fields and standard traits.
+# ---------------------------------------------------------------------------
+
+struct MergeRule(ImplicitlyCopyable & Equatable):
+    var first: Int
+    var second: Int
+    var merged: Int
+
+    def __init__(out self, first: Int, second: Int, merged: Int):
+        self.first = first
+        self.second = second
+        self.merged = merged
+
+    def __init__(out self, *, copy: Self):
+        self.first = copy.first
+        self.second = copy.second
+        self.merged = copy.merged
+
+    def __init__(out self, *, deinit move: Self):
+        self.first = move.first
+        self.second = move.second
+        self.merged = move.merged
+
+    def __eq__(self, other: Self) -> Bool:
+        return (
+            self.first == other.first
+            and self.second == other.second
+            and self.merged == other.merged
+        )
+
+    def __ne__(self, other: Self) -> Bool:
+        return not self == other
+
+    def __hash__(self) -> Int:
+        return (
+            (self.first * 2654435761)
+            ^ (self.second * 2246822519)
+            ^ (self.merged * 3266489917)
+        )
+
+    def __str__(self) -> String:
+        return (
+            "("
+            + String(self.first)
+            + ", "
+            + String(self.second)
+            + ") → "
+            + String(self.merged)
+        )
+
+
+# ---------------------------------------------------------------------------
 # PairCache — O(1) (token-pair → merged-id) lookup table
 #
 # Two-tier design:
@@ -159,7 +213,7 @@ struct PairCache(ImplicitlyCopyable & Movable):
 # States
 # ------
 #   vocab       : ID → display string         (List[String])
-#   merges      : ordered merge rules         (List[Tuple[Int, Int, Int]])
+#   merges      : ordered merge rules         (List[MergeRule])
 #   merge_cache : fast pair→merged-id lookup  (PairCache)
 #   byte_to_cp  : raw byte → safe codepoint   (Dict[Int, Int])
 #   cp_to_byte  : safe codepoint → raw byte   (Dict[Int, Int])
@@ -199,7 +253,7 @@ struct PairCache(ImplicitlyCopyable & Movable):
 
 struct BPETokenizer(Sized & Movable):
     var vocab: List[String]
-    var merges: List[Tuple[Int, Int, Int]]
+    var merges: List[MergeRule]
     var merge_cache: PairCache
     var byte_to_cp: Dict[Int, Int]
     var cp_to_byte: Dict[Int, Int]
@@ -208,7 +262,7 @@ struct BPETokenizer(Sized & Movable):
 
     def __init__(out self):
         self.vocab = List[String]()
-        self.merges = List[Tuple[Int, Int, Int]]()
+        self.merges = List[MergeRule]()
         self.merge_cache = PairCache()
         self.byte_to_cp = Dict[Int, Int]()
         self.cp_to_byte = Dict[Int, Int]()
@@ -300,7 +354,7 @@ struct BPETokenizer(Sized & Movable):
         # ---- 5. Merge loop ----------------------------------------------
         # Each iteration finds the most frequent adjacent pair across all
         # words and replaces every occurrence with a single new token.
-        self.merges = List[Tuple[Int, Int, Int]]()
+        self.merges = List[MergeRule]()
         while len(self.vocab) < vocab_size:
             # Count how often each pair of adjacent token-IDs appears.
             var pair_freqs = _compute_pair_freqs(splits, word_freqs)
@@ -325,7 +379,7 @@ struct BPETokenizer(Sized & Movable):
             _merge_pair(a_id, b_id, merged_id, splits, word_freqs)
             # Store in order so encoding always applies merges in the same
             # sequence they were learned.
-            self.merges.append((a_id, b_id, merged_id))
+            self.merges.append(MergeRule(a_id, b_id, merged_id))
             self.merge_cache.set(a_id, b_id, merged_id)
             # The display string is the concatenation of the two parts.
             # We copy to avoid aliasing: self.vocab[a_id] is a view into
@@ -476,11 +530,11 @@ struct BPETokenizer(Sized & Movable):
         data["vocab"] = py_vocab
 
         var py_merges = Python.list()
-        for (a_id, b_id, merged_id) in self.merges:
+        for merge in self.merges:
             var entry = Python.list()
-            entry.append(Python.int(a_id))
-            entry.append(Python.int(b_id))
-            entry.append(Python.int(merged_id))
+            entry.append(Python.int(merge.first))
+            entry.append(Python.int(merge.second))
+            entry.append(Python.int(merge.merged))
             py_merges.append(entry)
         data["merges"] = py_merges
 
@@ -528,7 +582,7 @@ struct BPETokenizer(Sized & Movable):
             var a_id = Int(py=entry[0])
             var b_id = Int(py=entry[1])
             var merged_id = Int(py=entry[2])
-            tok.merges.append((a_id, b_id, merged_id))
+            tok.merges.append(MergeRule(a_id, b_id, merged_id))
             tok.merge_cache.set(a_id, b_id, merged_id)
 
         return tok^

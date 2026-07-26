@@ -159,17 +159,17 @@ struct PairCache(Movable):
 
 def build_rank_table(tok: BPETokenizer, ref bytes: TokenBytes) raises -> RankTable:
     var table = RankTable()
-    for (a_id, b_id, merged_id) in tok.merges:
+    for merge in tok.merges:
         var concat = List[UInt8]()
-        bytes.get_bytes(a_id, concat)
-        bytes.get_bytes(b_id, concat)
-        table.set(Span[UInt8](concat), Int32(merged_id))
+        bytes.get_bytes(merge.first, concat)
+        bytes.get_bytes(merge.second, concat)
+        table.set(Span[UInt8](concat), Int32(merge.merged))
     return table^
 
 def build_pair_cache(tok: BPETokenizer) raises -> PairCache:
     var cache = PairCache()
-    for (a_id, b_id, merged_id) in tok.merges:
-        cache.set(a_id, b_id, merged_id)
+    for merge in tok.merges:
+        cache.set(merge.first, merge.second, merge.merged)
     return cache^
 
 
@@ -207,8 +207,8 @@ def _merge_inplace(mut ids: List[Int], a: Int, b: Int, m: Int):
 def _encode_word_baseline(tok: BPETokenizer, word_span: Span[UInt8, _]) raises -> List[Int]:
     """Encode a single word using the tokenizer's merge list (sequential)."""
     var ids = _byte_ids(word_span)
-    for (a_id, b_id, merged_id) in tok.merges:
-        _merge_inplace(ids, a_id, b_id, merged_id)
+    for merge in tok.merges:
+        _merge_inplace(ids, merge.first, merge.second, merge.merged)
     return ids^
 
 def _encode_word_ranked(tok: BPETokenizer, word_span: Span[UInt8, _],
