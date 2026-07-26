@@ -18,3 +18,11 @@ benchmarks/*_result.txt
 # Python cache
 __pycache__/
 *.pyc
+
+# generated reference data (regenerate via `pixi run gen-refs`)
+benchmarks/ref_splits.json
+benchmarks/ref_counts.json
+
+# ad-hoc verification scripts
+lb_*.mojo
+benchmarks/verify_levelb.*

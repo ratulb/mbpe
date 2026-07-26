@@ -34,7 +34,7 @@ References
 
 from std.pathlib import Path
 from std.python import Python
-from std.memory import alloc
+from std.memory import alloc, memcpy
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 
@@ -471,13 +471,17 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         if total == 0:
             return String("")
         var buf = alloc[UInt8](total)
+        var ptr = self.token_bytes.unsafe_ptr()
         var write_offset: Int = 0
         for id in ids:
-            var start = self.token_offsets[id]
-            var end = start + self.token_lengths[id]
-            for r in range(start, end):
-                buf[write_offset] = self.token_bytes[r]
-                write_offset += 1
+            var n = self.token_lengths[id]
+            if n > 0:
+                memcpy(
+                    dest=buf + write_offset,
+                    src=ptr + self.token_offsets[id],
+                    count=n,
+                )
+                write_offset += n
         # ---- 3. Interpret bytes as UTF-8 (lossy) ------------------------
         var result = String(from_utf8=Span[UInt8](ptr=buf, length=write_offset))
         buf.free()

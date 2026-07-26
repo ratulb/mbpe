@@ -1,5 +1,107 @@
 from tokenizer import BPETokenizer
+from pretokenizer import GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer
+from std.pathlib import Path
 from std.testing import assert_equal, assert_true, TestSuite
+
+from std.python import Python
+
+
+def _check_splits[PT: PreTokenizer](pt: PT, text: String, expected: List[String]) raises:
+    var actual = pt.split(text)
+    assert_equal(len(actual), len(expected))
+    for i in range(len(actual)):
+        assert_equal(actual[i], expected[i])
+
+
+# ── Level A: Pre-tokenizer split alignment ──────────────────────
+
+def test_gpre_splits() raises:
+    var text = String(
+        "Hello world! Don't stop I'll be there 123 U.S.A. new\nline  \n\n \n"
+    )
+    var expected = List[String]()
+    expected.append(String("Hello"))
+    expected.append(String("Ġworld!"))
+    expected.append(String("ĠDon't"))
+    expected.append(String("Ġstop"))
+    expected.append(String("ĠI'll"))
+    expected.append(String("Ġbe"))
+    expected.append(String("Ġthere"))
+    expected.append(String("Ġ123"))
+    expected.append(String("ĠU"))
+    expected.append(String(".S"))
+    expected.append(String(".A"))
+    expected.append(String("."))
+    expected.append(String("Ġnew\nline"))
+    expected.append(String("Ġ"))
+    expected.append(String("Ġ\n\n"))
+    expected.append(String("Ġ\n"))
+    _check_splits(GPreTokenizer(), text, expected)
+
+
+def test_gpt2_splits() raises:
+    var text = String(
+        "Hello world! Don't stop I'll be there 123 U.S.A. new\nline  \n\n \n"
+    )
+    var expected = List[String]()
+    expected.append(String("Hello"))
+    expected.append(String(" world"))
+    expected.append(String("!"))
+    expected.append(String(" Don"))
+    expected.append(String("'t"))
+    expected.append(String(" stop"))
+    expected.append(String(" I"))
+    expected.append(String("'ll"))
+    expected.append(String(" be"))
+    expected.append(String(" there"))
+    expected.append(String(" 123"))
+    expected.append(String(" U"))
+    expected.append(String("."))
+    expected.append(String("S"))
+    expected.append(String("."))
+    expected.append(String("A"))
+    expected.append(String("."))
+    expected.append(String(" new"))
+    expected.append(String("\n"))
+    expected.append(String("line"))
+    expected.append(String("  \n\n \n"))
+    _check_splits(GPT2Pretokenizer(), text, expected)
+
+
+def test_gpt4_splits() raises:
+    var text = String(
+        "Hello world! Don't stop I'll be there 123 U.S.A. new\nline  \n\n \n"
+    )
+    var expected = List[String]()
+    expected.append(String("Hello"))
+    expected.append(String(" world"))
+    expected.append(String("!"))
+    expected.append(String(" Don"))
+    expected.append(String("'t"))
+    expected.append(String(" stop"))
+    expected.append(String(" I"))
+    expected.append(String("'ll"))
+    expected.append(String(" be"))
+    expected.append(String(" there"))
+    expected.append(String(" "))
+    expected.append(String("123"))
+    expected.append(String(" U"))
+    expected.append(String(".S"))
+    expected.append(String(".A"))
+    expected.append(String("."))
+    expected.append(String(" new"))
+    expected.append(String("\n"))
+    expected.append(String("line"))
+    expected.append(String("  \n\n \n"))
+    _check_splits(GPT4Pretokenizer(), text, expected)
+
+
+def test_split_counts() raises:
+    """Verify split counts match Python regex reference on full corpus."""
+    var text = Path("benchmarks/corpus.txt").read_text()
+    assert_equal(len(GPreTokenizer().split(text)), 179425)
+    assert_equal(len(GPT2Pretokenizer().split(text)), 265727)
+    assert_equal(len(GPT4Pretokenizer().split(text)), 242095)
 
 
 def test_byte_level_no_unk() raises:
