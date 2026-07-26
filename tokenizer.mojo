@@ -39,7 +39,7 @@ from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 from std.base64 import b64encode, b64decode
 
-from pretokenizer import PreTokenizer, GPreTokenizer
+from pretokenizer import PreTokenizer, GPreTokenizer, ByteMapping
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +228,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
     var token_bytes: List[UInt8]
     var token_offsets: List[Int]
     var token_lengths: List[Int]
+    var special_bytes: Dict[String, Int]
+    var inverse_special: Dict[Int, String]
 
     def __init__(out self):
         self.pt = Self.PT()
@@ -239,6 +241,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         self.token_bytes = List[UInt8]()
         self.token_offsets = List[Int]()
         self.token_lengths = List[Int]()
+        self.special_bytes = Dict[String, Int]()
+        self.inverse_special = Dict[Int, String]()
         # GPT-2 bytes_to_unicode mapping (fixed at init, used by all methods)
         var n = 0
         for b in range(256):
@@ -257,6 +261,38 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
                 self.byte_to_cp[b] = cp
                 self.cp_to_byte[cp] = b
                 n += 1
+
+    def register_special_tokens(mut self, tokens: Dict[String, Int]) raises:
+        """Register special tokens that bypass BPE encoding.
+
+        Special tokens are preserved as single IDs during encode()
+        (no BPE splitting) and skipped in save_tiktoken().
+        Each special token's display text IS its raw text
+        (no bytes_to_unicode mapping applied).
+
+        Args:
+            tokens: Dict mapping special token text to its reserved ID.
+        """
+        for item in tokens.items():
+            self._register_special_token(item.key, item.value)
+
+    def _register_special_token(mut self, text: String, id: Int) raises:
+        if text.byte_length() == 0:
+            raise Error("special token text must not be empty")
+        if text in self.special_bytes:
+            raise Error("duplicate special token: " + text)
+        while len(self.vocab) <= id:
+            self.vocab.append(String())
+            self.token_offsets.append(len(self.token_bytes))
+            self.token_lengths.append(0)
+        self.special_bytes[text] = id
+        self.inverse_special[id] = text
+        self.vocab[id] = text
+        var raw = text.as_bytes()
+        self.token_offsets[id] = len(self.token_bytes)
+        for i in range(len(raw)):
+            self.token_bytes.append(raw[i])
+        self.token_lengths[id] = len(raw)
 
     # ── training ────────────────────────────────────────────────────────
     # The algorithm:
@@ -277,6 +313,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
     # ─────────────────────────────────────────────────────────────────────
 
     def train[mut: Bool, //, origin: Origin[mut=mut]](mut self, corpus: Span[String, origin], vocab_size: Int) raises:
+        if vocab_size < 256:
+            raise Error("vocab_size must be at least 256 to hold the base byte vocabulary")
         # ---- 1. Pre-tokenise and compute word frequencies ----------------
         var word_freqs = Dict[String, Int]()
         for text in corpus:
@@ -292,17 +330,21 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         # representation.  Merge tokens are appended below.
         # token_bytes/token_offsates form a flat array: token i's bytes are
         # token_bytes[token_offsets[i]:token_offsets[i+1]].
+        # For SEQUENTIAL: rank == byte, so vocab[rank] = display(byte).
+        # For SHUFFLED:   rank != byte, so we use id_to_byte(rank) to find
+        # the raw byte for each rank, ensuring vocab[rank] is correct.
         self.vocab = List[String](capacity=vocab_size)
         self.token_bytes = List[UInt8]()
         self.token_offsets = List[Int](capacity=vocab_size + 1)
         self.token_lengths = List[Int](capacity=vocab_size)
-        for b in range(256):
+        for rank in range(256):
+            var b = Self.PT.id_to_byte(rank)
             var display = chr(self.byte_to_cp[b])
             self.vocab.append(display)
             self.token_offsets.append(len(self.token_bytes))
             for cp in display.codepoints():
                 self.token_bytes.append(UInt8(self.cp_to_byte[Int(cp)]))
-            self.token_lengths.append(len(self.token_bytes) - self.token_offsets[b])
+            self.token_lengths.append(len(self.token_bytes) - self.token_offsets[rank])
 
         # ---- 4. Build flat token-ID sequence with SEP sentinel ------------
         # Flatten the word-frequency structure into a single List[Int] with
@@ -317,7 +359,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
                 if len(ids) > 0:
                     ids.append(SEP)
                 for i in range(len(sb)):
-                    ids.append(Int(sb[i]))
+                    ids.append(Self.PT.byte_to_id(Int(sb[i])))
 
         # ---- 5. Count initial pair frequencies (one pass) -----------------
         # Pairs involving SEP are skipped (they can never be merged).
@@ -331,6 +373,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         # Each iteration finds the most frequent pair, applies the merge via
         # a single scan of `ids`, and updates `stats` incrementally (only
         # the 5 pairs affected per occurrence are adjusted).
+        self.merge_cache = PairCache()
         self.merges = List[MergeRule]()
         while len(self.vocab) < vocab_size:
             # Find the most frequent pair that does not involve SEP.
@@ -436,7 +479,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
     # string-like value without owning a String.
     # ─────────────────────────────────────────────────────────────────────
 
-    def _tokenize[
+    def encode_ordinary[
         mut: Bool,
         //,
         origin: Origin[mut=mut],
@@ -463,9 +506,12 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
             var n = word.byte_length()
             var dst = result.unsafe_ptr() + write_pos
 
-            # Copy bytes as Ints
+            # Copy bytes as Ints (via PT byte mapping)
             for i in range(n):
-                dst[i] = Int(ptr[i])
+                comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
+                    dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
+                else:
+                    dst[i] = Int(ptr[i])
 
             # Greedy lowest-rank merge loop
             while n >= 2:
@@ -482,7 +528,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
                         best_m = merged
                 if best_rank < 0:
                     break
-                n = _merge_inplace_ptr(dst, n, best_a, best_b, best_m)
+                n = merge_inplace(dst, n, best_a, best_b, best_m)
 
             write_pos += n
 
@@ -495,7 +541,60 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         //,
         origin: Origin[mut=mut],
     ](self, text: StringSlice[origin]) raises -> List[Int]:
-        return self._tokenize(text)
+        if len(self.special_bytes) == 0:
+            return self.encode_ordinary(text)
+
+        var n = text.byte_length()
+        if n == 0:
+            return List[Int]()
+
+        var bytes = text.as_bytes()
+        var result = List[Int]()
+        var pos = 0
+
+        while pos < n:
+            var found_id = -1
+            var found_len = 0
+            for item in self.special_bytes.items():
+                var tok = item.key
+                var tok_id = item.value
+                var tok_len = tok.byte_length()
+                if pos + tok_len <= n:
+                    var matched = True
+                    var tok_bytes = tok.as_bytes()
+                    for k in range(tok_len):
+                        if bytes[pos + k] != tok_bytes[k]:
+                            matched = False
+                            break
+                    if matched:
+                        found_id = tok_id
+                        found_len = tok_len
+                        break
+            if found_id >= 0:
+                result.append(found_id)
+                pos += found_len
+            else:
+                var start = pos
+                var next_special = n
+                for item in self.special_bytes.items():
+                    var tok = item.key
+                    var found_at = text.find(tok, start)
+                    if found_at >= 0 and found_at < next_special:
+                        next_special = found_at
+                if next_special > start:
+                    var seg = String(from_utf8_lossy=bytes[start:next_special])
+                    for id in self.encode_ordinary(seg):
+                        result.append(id)
+                    pos = next_special
+                elif next_special == start:
+                    pos += 1
+                else:
+                    var seg = String(from_utf8_lossy=bytes[start:n])
+                    for id in self.encode_ordinary(seg):
+                        result.append(id)
+                    pos = n
+
+        return result^
 
     # ── decoding ─────────────────────────────────────────────────────────
     # Decode uses precomputed raw bytes per token (token_bytes built during
@@ -510,6 +609,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
             return String("")
         var total: Int = 0
         for id in ids:
+            if id < 0 or id >= len(self.token_lengths):
+                raise Error("token ID out of range: " + String(id))
             total += self.token_lengths[id]
         if total == 0:
             return String("")
@@ -526,7 +627,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
                 )
                 write_offset += n
         # ---- 3. Interpret bytes as UTF-8 (lossy) ------------------------
-        var result = String(from_utf8=Span[UInt8](ptr=buf, length=write_offset))
+        var result = String(from_utf8_lossy=Span[UInt8](ptr=buf, length=write_offset))
         buf.free()
         return result^
 
@@ -566,6 +667,14 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
             entry.append(Python.int(merge.merged))
             py_merges.append(entry)
         data["merges"] = py_merges
+
+        var py_special = Python.list()
+        for item in self.special_bytes.items():
+            var entry = Python.list()
+            entry.append(Python.str(item.key))
+            entry.append(Python.int(item.value))
+            py_special.append(entry)
+        data["special_tokens"] = py_special
 
         var py_byte_to_cp = Python.list()
         for b in range(256):
@@ -625,6 +734,16 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
             var merged_id = Int(py=entry[2])
             tok.merges.append(MergeRule(a_id, b_id, merged_id))
             tok.merge_cache.set(a_id, b_id, merged_id)
+
+        try:
+            var py_special = data["special_tokens"]
+            if len(py_special) > 0:
+                for i in range(len(py_special)):
+                    var text = String(py_special[i][0])
+                    var id = Int(py=py_special[i][1])
+                    tok._register_special_token(text, id)
+        except:
+            pass
 
         return tok^
 
@@ -750,8 +869,12 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
     def save_tiktoken(mut self, path: String) raises:
         with open(path, "w") as f:
             for token_id in range(len(self.vocab)):
-                var raw = List[UInt8](capacity=4)
+                if token_id in self.inverse_special:
+                    continue
                 var display = self.vocab[token_id]
+                if display.byte_length() == 0:
+                    continue
+                var raw = List[UInt8](capacity=4)
                 for cp in display.codepoints():
                     raw.append(UInt8(self.cp_to_byte[Int(cp)]))
                 var encoded = b64encode(Span[UInt8](raw))
@@ -824,13 +947,17 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable):
         self.token_lengths = new_token_lengths^
         self.merge_cache = new_merge_cache^
 
+        for item in Self.PT.special_tokens().items():
+            if not item.value in self.inverse_special:
+                self._register_special_token(item.key, item.value)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Hot-path helpers — raw pointer operations, zero allocations
 # ═══════════════════════════════════════════════════════════════════════════
 
 @always_inline
-def _merge_inplace_ptr(
+def merge_inplace(
     buf: UnsafePointer[Int, MutAnyOrigin],
     n: Int,
     a: Int, b: Int, m: Int,

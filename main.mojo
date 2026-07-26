@@ -1,5 +1,5 @@
 from tokenizer import BPETokenizer
-from pretokenizer import GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer
+from pretokenizer import GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, TestSuite
 from std.base64 import b64decode
@@ -7,7 +7,7 @@ from std.base64 import b64decode
 from std.python import Python
 
 
-def _check_splits[PT: PreTokenizer](pt: PT, text: String, expected: List[String]) raises:
+def check_splits[PT: PreTokenizer](pt: PT, text: String, expected: List[String]) raises:
     var actual = pt.split(text)
     assert_equal(len(actual), len(expected))
     for i in range(len(actual)):
@@ -37,7 +37,7 @@ def test_gpre_splits() raises:
     expected.append(String("Ġ"))
     expected.append(String("Ġ\n\n"))
     expected.append(String("Ġ\n"))
-    _check_splits(GPreTokenizer(), text, expected)
+    check_splits(GPreTokenizer(), text, expected)
 
 
 def test_gpt2_splits() raises:
@@ -66,7 +66,7 @@ def test_gpt2_splits() raises:
     expected.append(String("\n"))
     expected.append(String("line"))
     expected.append(String("  \n\n \n"))
-    _check_splits(GPT2Pretokenizer(), text, expected)
+    check_splits(GPT2Pretokenizer(), text, expected)
 
 
 def test_gpt4_splits() raises:
@@ -94,7 +94,7 @@ def test_gpt4_splits() raises:
     expected.append(String("\n"))
     expected.append(String("line"))
     expected.append(String("  \n\n \n"))
-    _check_splits(GPT4Pretokenizer(), text, expected)
+    check_splits(GPT4Pretokenizer[ByteMapping.SEQUENTIAL](), text, expected)
 
 
 def test_split_counts() raises:
@@ -102,7 +102,7 @@ def test_split_counts() raises:
     var text = Path("benchmarks/corpus.txt").read_text()
     assert_equal(len(GPreTokenizer().split(text)), 179425)
     assert_equal(len(GPT2Pretokenizer().split(text)), 265727)
-    assert_equal(len(GPT4Pretokenizer().split(text)), 242095)
+    assert_equal(len(GPT4Pretokenizer[ByteMapping.SEQUENTIAL]().split(text)), 242095)
 
 
 def test_byte_level_no_unk() raises:
@@ -426,13 +426,13 @@ def test_tiktoken_gpt4_roundtrip() raises:
     """Full .tiktoken roundtrip with GPT4Pretokenizer."""
     var corpus = List[String]()
     corpus.append(String("Hello world! Don't stop."))
-    var tok = BPETokenizer[GPT4Pretokenizer]()
+    var tok = BPETokenizer[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]()
     tok.train(corpus, 300)
     var test_input = String("Hello world! Don't stop.")
     var original_ids = tok.encode(test_input)
 
     tok.save_tiktoken("/tmp/bpe_gpt4_rt.tiktoken")
-    var loaded = BPETokenizer[GPT4Pretokenizer]()
+    var loaded = BPETokenizer[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]()
     loaded.load_tiktoken("/tmp/bpe_gpt4_rt.tiktoken")
 
     assert_equal(len(loaded.merges), len(tok.merges))
@@ -507,6 +507,303 @@ def test_tiktoken_no_merges() raises:
     assert_equal(len(loaded), 256)
     assert_equal(len(loaded.merges), 0)
     assert_equal(loaded.decode(loaded.encode(String("hello"))), "hello")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 8 — o200k_base interop test
+# ═══════════════════════════════════════════════════════════════
+
+def test_load_o200k_base() raises:
+    """Load OpenAI's real o200k_base.tiktoken and verify structural correctness
+    plus encode/decode roundtrip.  Uses GPT4Pretokenizer[ByteMapping.SHUFFLED]
+    because o200k_base uses a permuted byte-to-ID mapping (rank 0 = '!' not 0x00)."""
+    var tok = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
+    tok.load_tiktoken("/home/tenmoomnet/bpe.mojo/data/o200k_base.tiktoken")
+
+    # o200k_base has 199,998 file entries, plus 21 reserved/special IDs (199998-200018)
+    assert_equal(len(tok), 200019)
+    assert_equal(len(tok.special_bytes), 2)
+    assert_equal(tok.special_bytes["<|endoftext|>"], 199999)
+    assert_equal(tok.special_bytes["<|endofprompt|>"], 200018)
+
+    # Should have 199,742 merges (199998 - 256 base bytes)
+    assert_equal(len(tok.merges), 199742)
+
+    # Verify the loaded tokenizer can be saved and re-loaded
+    var path = "/tmp/bpe_o200k_roundtrip.tiktoken"
+    tok.save_tiktoken(path)
+    var reloaded = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
+    reloaded.load_tiktoken(path)
+    assert_equal(len(reloaded), len(tok))
+    assert_equal(len(reloaded.merges), len(tok.merges))
+
+    # Verify that merge consistency holds: vocab[merged] == vocab[left] + vocab[right]
+    var checked = 0
+    for mr in reloaded.merges:
+        var left = reloaded.vocab[mr.first].copy()
+        var right = reloaded.vocab[mr.second].copy()
+        var expected = left + right
+        assert_equal(reloaded.vocab[mr.merged], expected)
+        checked += 1
+        if checked >= 1000:
+            break
+
+    # Verify encode/decode roundtrip — this was previously blocked because
+    # o200k uses a shuffled byte mapping.  Now GPT4Pretokenizer[SHUFFLED]
+    # handles the mapping correctly.
+    var text = String("Hello world!")
+    var ids = tok.encode(text)
+    assert_true(len(ids) > 0, "o200k encode must produce tokens")
+    var decoded = tok.decode(ids)
+    assert_equal(decoded, text)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 9 — Functional parity: train → save → load → encode match
+# ═══════════════════════════════════════════════════════════════
+
+def test_tiktoken_load_parity() raises:
+    """Train a tokenizer, save as .tiktoken, load into a fresh instance,
+    and verify encode produces identical token IDs.  This validates that
+    load_tiktoken fully recovers the encoding behavior."""
+    var corpus = List[String]()
+    corpus.append(String("This is the Hugging Face Course."))
+    corpus.append(String("This chapter is about tokenization."))
+    corpus.append(String("This section shows several tokenizer algorithms."))
+    corpus.append(String(
+        "Hopefully, you will be able to understand how they are trained and"
+        " generate tokens."
+    ))
+    var tok = BPETokenizer()
+    tok.train(corpus, 300)
+
+    var test_input = String("This is not a token.")
+    var original_ids = tok.encode(test_input)
+
+    var path = "/tmp/bpe_parity_test.tiktoken"
+    tok.save_tiktoken(path)
+
+    var loaded = BPETokenizer()
+    loaded.load_tiktoken(path)
+
+    assert_equal(len(loaded), len(tok))
+    assert_equal(len(loaded.merges), len(tok.merges))
+
+    var loaded_ids = loaded.encode(test_input)
+    assert_equal(len(loaded_ids), len(original_ids))
+    for i in range(len(original_ids)):
+        assert_equal(loaded_ids[i], original_ids[i])
+    assert_equal(loaded.decode(loaded_ids), test_input)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Byte mapping tests
+# ═══════════════════════════════════════════════════════════════
+
+def test_byte_mapping_sequential() raises:
+    """For GPT4 SEQUENTIAL (cl100k), byte_to_id is identity for all 256 bytes."""
+    for b in range(256):
+        assert_equal(GPT4Pretokenizer[ByteMapping.SEQUENTIAL].byte_to_id(b), b)
+        assert_equal(GPT4Pretokenizer[ByteMapping.SEQUENTIAL].id_to_byte(b), b)
+
+
+def test_byte_mapping_shuffled() raises:
+    """For GPT4 SHUFFLED (o200k), LUT permutes the byte→ID mapping.
+
+    Spot-checks: ASCII letters (0x61-0x7A) map to ranks 64-89,
+    space (0x20) maps to 220, DEL (0x7F) maps to 221.
+    """
+    # Space (0x20) → rank 220
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].byte_to_id(0x20), 220)
+    # Rank 220 → space (0x20)
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].id_to_byte(220), 0x20)
+
+    # DEL (0x7F) → rank 221
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].byte_to_id(0x7F), 221)
+    # Rank 221 → DEL (0x7F)
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].id_to_byte(221), 0x7F)
+
+    # 'a' (0x61) → rank 64
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].byte_to_id(0x61), 64)
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].id_to_byte(64), 0x61)
+
+    # 'z' (0x7A) → rank 89
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].byte_to_id(0x7A), 89)
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].id_to_byte(89), 0x7A)
+
+    # '!' (0x21) → rank 0 (lowest rank in o200k)
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].byte_to_id(0x21), 0)
+    assert_equal(GPT4Pretokenizer[ByteMapping.SHUFFLED].id_to_byte(0), 0x21)
+
+    # Inverse mapping: id_to_byte(byte_to_id(b)) == b for every byte
+    for b in range(256):
+        assert_equal(
+            GPT4Pretokenizer[ByteMapping.SHUFFLED].id_to_byte(
+                GPT4Pretokenizer[ByteMapping.SHUFFLED].byte_to_id(b)
+            ),
+            b,
+        )
+
+
+def test_byte_mapping_roundtrip() raises:
+    """Train with SHUFFLED, encode/decode roundtrip works end-to-end."""
+    var corpus = List[String]()
+    corpus.append(String("The quick brown fox jumps over the lazy dog."))
+    corpus.append(String("A completely different sentence about tokenizers."))
+    corpus.append(String("Byte-level encoding must preserve all Unicode text."))
+
+    var tok = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
+    tok.train(corpus, 300)
+
+    var text = String("The quick brown fox jumps over the lazy dog.")
+    var ids = tok.encode(text)
+    assert_true(len(ids) > 0, "SHUFFLED encode must produce tokens")
+    var decoded = tok.decode(ids)
+    assert_equal(decoded, text)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Special token tests
+# ═══════════════════════════════════════════════════════════════
+
+def test_special_tokens_pt_mappings() raises:
+    """Each PT returns the correct special token mapping."""
+    var gpre = GPreTokenizer.special_tokens()
+    assert_equal(len(gpre), 0)
+
+    var gpt2 = GPT2Pretokenizer.special_tokens()
+    assert_equal(gpt2["<|endoftext|>"], 50256)
+
+    var gpt4_seq = GPT4Pretokenizer[ByteMapping.SEQUENTIAL].special_tokens()
+    assert_equal(len(gpt4_seq), 5)
+    assert_equal(gpt4_seq["<|endoftext|>"], 100257)
+    assert_equal(gpt4_seq["<|fim_prefix|>"], 100258)
+    assert_equal(gpt4_seq["<|fim_middle|>"], 100259)
+    assert_equal(gpt4_seq["<|fim_suffix|>"], 100260)
+    assert_equal(gpt4_seq["<|endofprompt|>"], 100276)
+
+    var gpt4_shu = GPT4Pretokenizer[ByteMapping.SHUFFLED].special_tokens()
+    assert_equal(len(gpt4_shu), 2)
+    assert_equal(gpt4_shu["<|endoftext|>"], 199999)
+    assert_equal(gpt4_shu["<|endofprompt|>"], 200018)
+
+
+def test_special_tokens_register() raises:
+    """Register special tokens and verify they're accessible."""
+    var tok = BPETokenizer[GPT2Pretokenizer]()
+    var specials = Dict[String, Int]()
+    specials["<|endoftext|>"] = 50256
+    tok.register_special_tokens(specials)
+    assert_equal(len(tok.special_bytes), 1)
+    assert_equal(tok.special_bytes["<|endoftext|>"], 50256)
+    assert_true(50256 in tok.inverse_special)
+    assert_equal(tok.inverse_special[50256], "<|endoftext|>")
+    assert_true(len(tok) >= 50257)
+    assert_equal(tok.vocab[50256], "<|endoftext|>")
+
+
+def test_special_tokens_encode_with_special() raises:
+    """Encode text containing a special token."""
+    var tok = BPETokenizer[GPreTokenizer]()
+    var corpus = List[String]()
+    corpus.append(String("Hello world this is a test"))
+    corpus.append(String("Another sentence for training"))
+    tok.train(corpus, 300)
+
+    var specials = Dict[String, Int]()
+    specials["<|endoftext|>"] = 300
+    tok.register_special_tokens(specials)
+
+    var text = String("Hello <|endoftext|> world")
+    var ids = tok.encode(text)
+    assert_true(300 in ids, "special token ID must appear in output")
+
+    var decoded = tok.decode(ids)
+    # decode should reproduce the original text
+    assert_equal(decoded, text)
+
+
+def test_special_tokens_encode_without_special() raises:
+    """Encode without special token — same as encode_ordinary."""
+    var tok = BPETokenizer[GPreTokenizer]()
+    var corpus = List[String]()
+    corpus.append(String("Hello world this is a test"))
+    tok.train(corpus, 300)
+
+    var text = String("Hello world")
+    var ids_special = tok.encode(text)
+    var ids_ordinary = tok.encode_ordinary(text)
+    assert_equal(len(ids_special), len(ids_ordinary))
+    for i in range(len(ids_special)):
+        assert_equal(ids_special[i], ids_ordinary[i])
+
+
+def test_special_tokens_no_specials_registered() raises:
+    """No specials registered — encode_ordinary is the zero-cost path."""
+    var tok = BPETokenizer[GPreTokenizer]()
+    var corpus = List[String]()
+    corpus.append(String("Hello world this is a test"))
+    tok.train(corpus, 300)
+    assert_equal(len(tok.special_bytes), 0)
+    var ids = tok.encode("Hello world")
+    assert_true(len(ids) > 0)
+
+
+def test_special_tokens_save_load() raises:
+    """Save and load preserves special tokens."""
+    var tok = BPETokenizer[GPreTokenizer]()
+    var corpus = List[String]()
+    corpus.append(String("Hello world this is a test"))
+    tok.train(corpus, 300)
+
+    var specials = Dict[String, Int]()
+    specials["<|endoftext|>"] = 300
+    tok.register_special_tokens(specials)
+
+    var path = "/tmp/bpe_special_save_load.json"
+    tok.save(path)
+    var loaded = BPETokenizer.load(path)
+
+    assert_equal(len(loaded.special_bytes), 1)
+    assert_equal(loaded.special_bytes["<|endoftext|>"], 300)
+    assert_equal(loaded.vocab[300], "<|endoftext|>")
+
+
+def test_special_tokens_tiktoken_skip() raises:
+    """save_tiktoken skips special tokens."""
+    var tok = BPETokenizer[GPreTokenizer]()
+    var corpus = List[String]()
+    corpus.append(String("Hello world this is a test"))
+    tok.train(corpus, 300)
+
+    var specials = Dict[String, Int]()
+    specials["<|endoftext|>"] = 300
+    tok.register_special_tokens(specials)
+
+    var path = "/tmp/bpe_special_skip.tiktoken"
+    tok.save_tiktoken(path)
+
+    # Load back and check specials are re-registered
+    var loaded = BPETokenizer[GPreTokenizer]()
+    loaded.load_tiktoken(path)
+    # GPreTokenizer has no special tokens, so none should be registered
+    assert_equal(len(loaded.special_bytes), 0)
+
+
+def test_special_tokens_gpt2_auto_register() raises:
+    """GPT2Pretokenizer auto-registers <|endoftext|> on load_tiktoken."""
+    var tok = BPETokenizer[GPT2Pretokenizer]()
+    var corpus = List[String]()
+    corpus.append(String("Hello world this is a test"))
+    tok.train(corpus, 300)
+    var path = "/tmp/bpe_gpt2_special_auto.tiktoken"
+    tok.save_tiktoken(path)
+
+    var loaded = BPETokenizer[GPT2Pretokenizer]()
+    loaded.load_tiktoken(path)
+    assert_equal(len(loaded.special_bytes), 1)
+    assert_equal(loaded.special_bytes["<|endoftext|>"], 50256)
+    assert_equal(loaded.vocab[50256], "<|endoftext|>")
 
 
 def main() raises:

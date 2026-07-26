@@ -130,7 +130,7 @@ Each line is `rank base64_bytes`. The base token entries define the byte shuffle
 
 ---
 
-### Gap 3: Special tokens (HIGH)
+### Gap 3: Special tokens (HIGH) ✅
 
 **What special tokens are:**
 
@@ -138,36 +138,23 @@ Special tokens are reserved token IDs that bypass BPE entirely. They're used as 
 
 ```
 <|endoftext|>   — marks end of a text segment
-<|im_start|>    — start of an interleaved-message
-<|im_end|>      — end of an interleaved-message
 <|fim_prefix|>  — fill-in-the-middle prefix
 <|fim_middle|>  — fill-in-the-middle middle
 <|fim_suffix|>  — fill-in-the-middle suffix
+<|endofprompt|> — end of prompt signal
 ```
 
-**How bpe.mojo handles them (`regex_tokenizer.mojo:61–73`):**
+**How we handle it:**
 
-Registration stores two maps:
-```mojo
-var special_tokens: Dict[String, Int]     # text → ID
-var inverse_special: Dict[Int, String]     # ID → text
-```
+Each `PreTokenizer` family defines its special tokens via `special_tokens()`:
+- `GPreTokenizer` → none
+- `GPT2Pretokenizer` → `<|endoftext|>` at 50256
+- `GPT4Pretokenizer[SEQUENTIAL]` → 5 specials (cl100k_base)
+- `GPT4Pretokenizer[SHUFFLED]` → 2 specials (o200k_base)
 
-During `encode()` (lines 221–294):
-1. Walk the input byte-by-byte
-2. At each position, check if any special token starts here
-3. If a match is found, emit the special token ID and skip past it
-4. If no match, scan ahead to the next special-token boundary, BPE-encode the segment in between, and emit its IDs
-5. Continue
+On `load_tiktoken()`, specials are auto-registered from the PT. On `save_tiktoken()`, they're excluded. `encode()` scans for special token text at byte level and preserves them as single IDs. `decode()` reads them from `token_bytes` like any other token (their display text IS the raw bytes). 8 tests cover registration, encode/decode, roundtrip, save/load, and PT-specific mappings.
 
-**Implication for us:** Without this, `<|endoftext|>` in input text will be decomposed into `<`, `|`, `e`, `n`, `d`, ... and merged with neighbors. The round-trip `encode → decode` would lose the special boundary. Chat-style inputs would be corrupted.
-
-**What to change:**
-1. Add `special_tokens` and `inverse_special` fields to `BPETokenizer`
-2. Add `register_special_tokens()` method
-3. Modify `encode()` to split on special-token boundaries before BPE
-4. Modify `decode()` to emit special token text for reserved IDs
-5. Guard: normal BPE merges must never produce a special token ID
+**Total: 36 tests in main.mojo, 9 in tests/test_tokenizer.mojo.**
 
 ---
 

@@ -224,7 +224,7 @@ for word in words:
                 best_m = merged
         if best_rank < 0:
             break
-        n = _merge_inplace_ptr(dst, n, best_a, best_b, best_m)
+        n = merge_inplace(dst, n, best_a, best_b, best_m)
 
     # Trim excess
     while len(result) > start + n:

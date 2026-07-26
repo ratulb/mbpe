@@ -1,0 +1,510 @@
+Following are exhaustive list of test coverage we need to implement and make sure they are passing. They would catch errors and let us know if we have yet taken care of required functionalities. Make a tests/ folder and start implementing them with proper comments.
+
+Some/all of them may be missing 'raises'. Add them.
+
+"""
+Consolidated exhaustive test suite for a BPE tokenizer supporting
+training, encode/decode, and .tiktoken format I/O.
+"""
+
+# ============================================================
+# 0. INITIALIZATION & CONFIGURATION
+# ============================================================
+
+# Tokenizer constructs with sensible defaults (empty vocab, default pattern).
+def test_initialization_default_params(): ...
+
+# Tokenizer accepts custom vocab_size, pattern, special tokens at construction.
+def test_initialization_custom_params(): ...
+
+# Negative/zero vocab_size or malformed pattern rejected at construction.
+def test_initialization_invalid_params_raises_valueerror(): ...
+
+# vocab_size below 256 (can't even hold base bytes) is rejected.
+def test_vocab_size_below_byte_range_raises_valueerror(): ...
+
+# Custom pat_str actually changes pre-tokenization boundaries.
+def test_pat_str_customization_affects_tokenization(): ...
+
+# Malformed/uncompilable regex pattern rejected at construction.
+def test_invalid_pattern_raises_valueerror(): ...
+
+
+# ============================================================
+# 1. VOCABULARY & TOKEN MANAGEMENT
+# ============================================================
+
+# Fresh vocab holds exactly the 256 base byte tokens, nothing else.
+def test_vocab_initial_state_is_256_bytes(): ...
+
+# Inserting a token that already exists is rejected, not silently duplicated.
+def test_vocab_duplicate_token_raises_valueerror(): ...
+
+# Token IDs assigned at insertion/load never change afterward.
+def test_vocab_ids_are_stable(): ...
+
+# Every token ID in the vocab is unique — no two tokens share an ID.
+def test_vocab_unique_ids(): ...
+
+# Special tokens keep their reserved IDs and ordering across all vocab ops.
+def test_special_tokens_not_reordered(): ...
+
+# len(vocab) matches 256 + merges + special tokens exactly.
+def test_vocab_size_matches_expected(): ...
+
+
+# ============================================================
+# 2. RANK TABLE / PAIR-LOOKUP CACHE
+# ============================================================
+# (Core of the tiktoken-style O(1) merge lookup — your primary optimization target)
+
+# Packed fast-path key insert/lookup round-trips for spans below the packing threshold.
+def test_rank_table_fast_path_insert_and_lookup(): ...
+
+# Overflow/slow-path insert/lookup round-trips for spans above the packing threshold.
+def test_rank_table_slow_path_insert_and_lookup(): ...
+
+# Lookup of a byte-pair with no merge rule returns the documented sentinel (-1 / None).
+def test_rank_table_missing_pair_returns_sentinel(): ...
+
+# The exact boundary length between fast-path and slow-path is tested on both sides.
+def test_rank_table_boundary_at_pack_size_minus_one(): ...
+def test_rank_table_boundary_at_pack_size(): ...
+
+# No two distinct byte spans hash/pack to the same fast-path key.
+def test_rank_table_no_fast_key_collisions(): ...
+
+# No two distinct byte spans hash to the same slow-path key.
+def test_rank_table_no_slow_key_collisions(): ...
+
+# Re-inserting an existing byte span overwrites its rank rather than duplicating.
+def test_rank_table_overwrite_existing_entry(): ...
+
+# Lower rank always outranks (wins over) higher rank when both pairs are eligible.
+def test_rank_table_lowest_rank_wins_on_tie_candidates(): ...
+
+# Rank table rebuilt from a saved .tiktoken file matches the in-memory one exactly.
+def test_rank_table_survives_save_load_roundtrip(): ...
+
+# Encode time does not scale with vocab size (the property the table exists to guarantee).
+def test_rank_table_lookup_is_O1_not_On(): ...
+
+
+# ============================================================
+# 3. MERGE RULES
+# ============================================================
+
+# A single applicable merge rule is applied correctly to a token sequence.
+def test_single_merge_applies_correctly(): ...
+
+# Multiple independent merges in one pass each apply correctly.
+def test_multiple_sequential_merges(): ...
+
+# A merge result is itself eligible for further merging (recursive/chained merges).
+def test_recursive_merges_chain_correctly(): ...
+
+# Sequence with no matching pair in the rank table is returned unchanged.
+def test_no_merge_possible_returns_input_unchanged(): ...
+
+# Long chain of sequential merges collapses a sequence to its expected final form.
+def test_longest_merge_chain_reaches_expected_token(): ...
+
+# Duplicate rank assigned to two different merge rules is rejected at load/train time.
+def test_duplicate_merge_rank_raises_valueerror(): ...
+
+# The identical (a, b) merge rule registered twice is rejected.
+def test_duplicate_merge_rule_raises_valueerror(): ...
+
+# A crafted merge table containing a cycle (a merges to something containing a) raises.
+def test_circular_merge_detection_raises_valueerror(): ...
+
+
+# ============================================================
+# 4. TRAINING
+# ============================================================
+
+# Single-text and multi-text corpora both train to a valid, non-empty merge list.
+def test_train_on_single_text(): ...
+def test_train_on_multiple_texts(): ...
+
+# Unicode, emoji, and mixed-language corpora train without error.
+def test_train_on_unicode_text(): ...
+def test_train_on_emojis(): ...
+def test_train_on_mixed_languages(): ...
+
+# Empty corpus either raises or returns base vocab only — pick one contract, test it.
+def test_train_on_empty_corpus_raises_valueerror(): ...
+
+# Corpus of one repeated byte/word trains without crashing (degenerate frequency table).
+def test_train_on_single_character_repeated(): ...
+def test_train_on_single_word_repeated(): ...
+
+# len(merges) + base vocab is exactly bounded by requested vocab_size, never exceeds it.
+def test_train_respects_vocab_size_limit(): ...
+
+# Requesting vocab_size smaller than the base alphabet (< 256) raises.
+def test_train_vocab_size_smaller_than_initial_raises_valueerror(): ...
+
+# Requesting more merges than the corpus can produce terminates cleanly (no infinite loop).
+def test_train_vocab_size_larger_than_achievable_terminates(): ...
+
+# Same corpus + same vocab_size trained twice yields byte-identical merge list.
+def test_train_is_deterministic(): ...
+
+# Equal-frequency pairs resolve via a documented, repeatable tie-break rule.
+def test_train_tie_breaking_is_deterministic(): ...
+
+# Highest-frequency pair in a synthetic corpus is always merge rank 0.
+def test_train_most_frequent_pair_merges_first(): ...
+
+# Vocabulary grows by exactly one entry per merge step — no gaps, no double-counting.
+def test_train_vocab_grows_one_token_per_merge(): ...
+
+# Regex pre-tokenization splits contractions/whitespace/punctuation as specified.
+def test_train_regex_pretokenization_splits_correctly(): ...
+
+# No merge ever spans two different pre-tokenization chunks.
+def test_train_merges_never_cross_pretoken_boundaries(): ...
+
+# Negative or zero vocab_size raises before any training work starts.
+def test_train_zero_or_negative_vocab_size_raises_valueerror(): ...
+
+# None/null corpus input raises a typed error rather than crashing deep in the loop.
+def test_train_none_corpus_raises_typeerror(): ...
+
+# Training does not mutate the caller's input corpus in place.
+def test_train_does_not_mutate_input_corpus(): ...
+
+# Re-running train() on an already-trained tokenizer resets state rather than appending.
+def test_retrain_reinitializes_state(): ...
+
+
+# ============================================================
+# 5. INCREMENTAL PAIR STATISTICS
+# ============================================================
+# (Only relevant if training uses incremental pair-count updates rather than full recount)
+
+# A single merge correctly decrements/increments the surrounding pair counts.
+def test_incremental_pair_counts_single_merge(): ...
+
+# Repeated occurrences of the same pair across the corpus update counts correctly.
+def test_incremental_pair_counts_multiple_occurrences(): ...
+
+# Merges at word boundaries (start/end) update neighbor counts correctly.
+def test_incremental_pair_counts_at_word_start(): ...
+def test_incremental_pair_counts_at_word_end(): ...
+
+# Two adjacent/overlapping merge candidates don't double-count or drop updates.
+def test_incremental_pair_counts_overlapping_candidates(): ...
+
+# Incremental statistics after N merges match a full from-scratch recount.
+def test_incremental_matches_full_recount(): ...
+
+# Pair frequency count never goes negative regardless of merge order.
+def test_incremental_pair_counts_never_negative(): ...
+
+
+# ============================================================
+# 6. ENCODING
+# ============================================================
+
+# Empty string encodes to an empty token list.
+def test_encode_empty_string(): ...
+
+# Single byte, single ASCII char, and a plain ASCII word encode correctly.
+def test_encode_single_byte(): ...
+def test_encode_ascii_word(): ...
+
+# Whitespace variants (space, tab, newline, multiple spaces, NBSP) encode without data loss.
+def test_encode_whitespace_variants(): ...
+
+# UTF-8 multi-byte text, emoji sequences, and mixed-script strings encode correctly.
+def test_encode_utf8_text(): ...
+def test_encode_emoji_sequences(): ...
+def test_encode_mixed_scripts_in_one_string(): ...
+
+# Arbitrary/random binary byte sequences (not valid UTF-8) still encode without raising.
+def test_encode_binary_bytes(): ...
+
+# Every possible single byte value (0–255) encodes to a valid token.
+def test_encode_all_possible_byte_values(): ...
+
+# Bytes with no merge partner fall back to their base byte-rank token.
+def test_encode_single_byte_not_in_vocab_falls_back_to_byte_token(): ...
+
+# Same input encoded twice on the same tokenizer instance gives identical token IDs.
+def test_encode_is_deterministic(): ...
+
+# Manually computed merge sequence on a small fixed vocab matches encode() step by step.
+def test_encode_matches_greedy_lowest_rank_merge(): ...
+
+# Long run of one repeated character completes within a bounded time/step count
+# (regression guard against quadratic-or-worse blowup).
+def test_encode_long_repeated_substring_no_quadratic_blowup(): ...
+
+# None/null input raises a specific typed error at the API boundary.
+def test_encode_none_input_raises_typeerror(): ...
+
+# Non-string/non-bytes input (e.g. an int or list) raises a typed error.
+def test_encode_non_string_input_raises_typeerror(): ...
+
+
+# ============================================================
+# 7. DECODING
+# ============================================================
+
+# Empty token list decodes to an empty string.
+def test_decode_empty_tokens(): ...
+
+# Single token and multi-token sequences decode to the expected bytes/string.
+def test_decode_single_token(): ...
+def test_decode_multiple_tokens(): ...
+
+# UTF-8 text and emoji reconstruct correctly from their token sequence.
+def test_decode_utf8_reconstruction(): ...
+def test_decode_emoji_reconstruction(): ...
+
+# Arbitrary binary byte sequences decode back to the exact original bytes.
+def test_decode_binary_bytes(): ...
+
+# Whitespace is preserved exactly (no trimming/normalization) through decode.
+def test_decode_whitespace_preservation(): ...
+
+# Token ID outside the valid vocab range raises a clear error.
+def test_decode_out_of_range_token_id_raises_indexerror(): ...
+
+# A token sequence mixing valid and invalid IDs raises rather than partially decoding.
+def test_decode_mixed_valid_invalid_ids_raises_indexerror(): ...
+
+# A token sequence that reconstructs an incomplete multi-byte UTF-8 char either
+# raises or uses a documented replacement-char fallback — assert the chosen contract.
+def test_decode_partial_utf8_sequence_raises_or_uses_fallback(): ...
+
+# None/null input raises a typed error.
+def test_decode_none_input_raises_typeerror(): ...
+
+# A list containing non-integer elements raises a typed error.
+def test_decode_list_with_non_ints_raises_typeerror(): ...
+
+# A non-list input (e.g. a string) raises a typed error.
+def test_decode_non_list_input_raises_typeerror(): ...
+
+
+# ============================================================
+# 8. ENCODE/DECODE ROUND-TRIP
+# ============================================================
+
+# ASCII, Unicode, emoji, and mixed-language text all round-trip exactly.
+def test_encode_decode_roundtrip_ascii(): ...
+def test_encode_decode_roundtrip_unicode(): ...
+def test_encode_decode_roundtrip_emojis(): ...
+def test_encode_decode_roundtrip_mixed_language(): ...
+
+# Long documents (many KB+) round-trip exactly, not just short samples.
+def test_encode_decode_roundtrip_large_document(): ...
+
+# Randomized fuzz inputs (arbitrary bytes, including invalid UTF-8) round-trip at
+# the byte level even when not valid text.
+def test_encode_decode_roundtrip_random_bytes(seed: int): ...
+
+# Round-trip holds when special tokens are interspersed with regular text.
+def test_encode_decode_roundtrip_with_special_tokens(): ...
+
+# Repeating encode?decode?encode several times gives a stable fixed point.
+def test_encode_decode_roundtrip_stable_across_repetitions(): ...
+
+
+# ============================================================
+# 9. SPECIAL TOKENS
+# ============================================================
+
+# Registered special tokens get reserved IDs that never collide with a learned merge.
+def test_special_tokens_get_reserved_ids(): ...
+
+# A special token in the input text encodes as one atomic ID, never decomposed by BPE.
+def test_special_tokens_not_split_by_bpe(): ...
+
+# Special token literal appearing in text without being allow-listed raises.
+def test_special_token_in_text_without_allowlist_raises_valueerror(): ...
+
+# Special token literal appearing in text WITH allow-listing encodes correctly.
+def test_special_token_explicit_allowlist_permits_encoding(): ...
+
+# decode() on a special token's ID reconstructs its exact original string.
+def test_decode_special_token_id_returns_original_string(): ...
+
+# Registering a special token whose string is empty is rejected.
+def test_special_token_empty_string_raises_valueerror(): ...
+
+# Registering the same special token string twice is rejected.
+def test_special_tokens_duplicate_raises_valueerror(): ...
+
+# Special token that is a substring of ordinary text (overlap case) resolves per
+# the documented priority rule (special token wins), not partial-matched.
+def test_special_token_overlap_with_surrounding_text(): ...
+
+
+# ============================================================
+# 10. BYTE / UNICODE EDGE CASES
+# ============================================================
+
+# Embedded NUL byte encodes/decodes without truncation.
+def test_handles_embedded_null_byte(): ...
+
+# Malformed/invalid UTF-8 byte sequences (lone continuation bytes, etc.) never raise
+# during encode — BPE operates on raw bytes, not validated text.
+def test_encode_malformed_utf8_does_not_raise(): ...
+
+# Input containing only whitespace, only newlines, or only punctuation is handled cleanly.
+def test_whitespace_only_input(): ...
+def test_punctuation_only_input(): ...
+
+# Very long single token/word (no natural split point) encodes/decodes without error.
+def test_very_long_unsplittable_token(): ...
+
+
+# ============================================================
+# 11. .TIKTOKEN FORMAT I/O
+# ============================================================
+
+# Every non-empty line of a .tiktoken file loads; line count matches table size.
+def test_load_tiktoken_parses_all_lines(): ...
+
+# Rank assigned to each entry equals its line number, per the .tiktoken spec.
+def test_load_tiktoken_ranks_match_line_order(): ...
+
+# Known entries from a real .tiktoken file (e.g. GPT-2's) decode to expected bytes.
+def test_load_tiktoken_base64_decodes_correctly(): ...
+
+# train() -> save -> load produces a table identical to the pre-save in-memory one.
+def test_save_load_tiktoken_roundtrip(): ...
+
+# Malformed base64 or a missing rank field on a line raises a descriptive parse error.
+def test_load_tiktoken_malformed_line_raises_valueerror(): ...
+
+# Two lines mapping to the same byte string is rejected explicitly (not silently overwritten).
+def test_load_tiktoken_duplicate_token_raises_valueerror(): ...
+
+# Two lines defining the same merge rule twice is rejected.
+def test_load_tiktoken_duplicate_merge_raises_valueerror(): ...
+
+# A truncated file (cut off mid-line) raises rather than loading a partial table.
+def test_load_tiktoken_truncated_file_raises_valueerror(): ...
+
+# An unrecognized format-version marker in the file raises.
+def test_load_tiktoken_unknown_version_raises_valueerror(): ...
+
+# Nonexistent file path raises a clear file-not-found error.
+def test_load_tiktoken_missing_file_raises_filenotfounderror(): ...
+
+# A path containing traversal sequences (../..) is rejected rather than followed.
+def test_load_tiktoken_path_traversal_raises_valueerror(): ...
+
+# Saving requires a trained tokenizer — saving before training raises.
+def test_save_tiktoken_before_training_raises_valueerror(): ...
+
+# Encoding/decoding before training (empty rank table) raises rather than silently
+# falling back to raw bytes.
+def test_encode_before_training_raises_valueerror(): ...
+def test_decode_before_training_raises_valueerror(): ...
+
+# Loading OpenAI's published gpt2.tiktoken and encoding a known string matches the
+# reference tiktoken library's output on that same string.
+def test_tiktoken_format_matches_reference_gpt2_file(): ...
+
+# Same cross-check against cl100k_base.tiktoken, if that vocab is supported.
+def test_tiktoken_format_matches_reference_cl100k_file(): ...
+
+# Loading a 100k+-line .tiktoken file completes within an established time budget.
+def test_load_tiktoken_large_vocab_within_time_budget(): ...
+
+
+# ============================================================
+# 12. CROSS-VALIDATION / COMPATIBILITY
+# ============================================================
+
+# Encode output matches Python's tiktoken library byte-for-byte on a varied corpus.
+def test_matches_tiktoken_library_encoding_on_corpus(corpus: list[str]): ...
+
+# Decode output matches the reference library on the same token sequences.
+def test_matches_tiktoken_library_decoding_on_corpus(corpus: list[str]): ...
+
+# Learned merge order matches the reference on a fixed training corpus.
+def test_matches_reference_merge_order(): ...
+
+# Total token count on a long real-world document matches the reference within
+# the same vocab — catches merge-order bugs that only surface at scale.
+def test_matches_reference_token_count_on_large_document(): ...
+
+# Curated tricky strings (contractions, numbers, URLs, repeated substrings) match
+# the reference implementation exactly.
+def test_matches_reference_on_known_tricky_strings(): ...
+
+
+# ============================================================
+# 13. PROPERTY-BASED TESTS
+# ============================================================
+
+# decode(encode(x)) == x holds for arbitrary generated inputs.
+def test_property_encode_decode_identity(): ...
+
+# Incremental pair statistics always equal a full naive recomputation.
+def test_property_incremental_equals_naive_recount(): ...
+
+# Training is deterministic across repeated runs with the same seed/corpus.
+def test_property_training_is_deterministic(): ...
+
+# All vocabulary IDs are unique, for any trained vocab size.
+def test_property_vocab_ids_unique(): ...
+
+# The merge graph never contains a cycle.
+def test_property_merge_graph_is_acyclic(): ...
+
+# Merge ranks are strictly increasing in training order.
+def test_property_merge_ranks_strictly_increasing(): ...
+
+# Every token in the vocab can be decoded without raising.
+def test_property_every_token_is_decodable(): ...
+
+
+# ============================================================
+# 14. PERFORMANCE / REGRESSION GUARDS
+# ============================================================
+
+# Encoding a fixed reference corpus stays within an established tokens/sec floor.
+def benchmark_encode_throughput_regression(): ...
+
+# Decoding throughput regression guard.
+def benchmark_decode_throughput_regression(): ...
+
+# Training time on a fixed large corpus stays within an established time budget.
+def benchmark_train_large_corpus(): ...
+
+# .tiktoken save/load stays within an established time budget.
+def benchmark_save_load_tiktoken(): ...
+
+# Encode/decode memory footprint on a large document stays within budget
+# (relevant given Mojo's manual memory model — catches leaked buffers).
+def benchmark_memory_footprint_large_document(): ...
+
+
+# ============================================================
+# 15. SECURITY / DENIAL-OF-SERVICE EDGE CASES
+# ============================================================
+
+# Adversarial input designed to trigger worst-case merge-loop behavior completes
+# within a bounded time (no unbounded/billion-iteration loop).
+def test_adversarial_input_bounded_loop_time(): ...
+
+# Extremely long input text (memory/time bound) either completes or raises a
+# resource-limit error cleanly, never hangs.
+def test_extremely_long_text_raises_or_completes_within_budget(): ...
+
+
+# ============================================================
+# 16. REGRESSION TESTS
+# ============================================================
+# One test per fixed historical bug, named by ticket/issue ID as they occur:
+
+def test_regression_001(): ...
+def test_regression_002(): ...

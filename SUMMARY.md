@@ -1,58 +1,39 @@
 ## Objective
-- Optimize BPETokenizer decode performance; refactor pre-tokenization into trait-backed dispatch; cross-verify all three pre-tokenizers against Python regex references; add incremental pair-stats training; document everything extensively.
+- Implement comprehensive, realistic performance benchmarks across all 3 pre-tokenizer variants (GPre, GPT2, GPT4) against Python tiktoken and Rust tiktoken-rs, with integrated cross-validation.
 
 ## Important Details
-- Decode optimized from 19.9 → **66.7 M tok/s** (first pass), then **109.3 M tok/s** with `memcpy` chain via `List.unsafe_ptr()` — 1.9× Rust tiktoken-rs (57.1 M). Encode 10.9 M tok/s (3.5× Rust).
-- `PreTokenizer` trait + three implementations: `GPreTokenizer` (Ġ), `GPT2Pretokenizer` (r50k_base, 7 matchers), `GPT4Pretokenizer` (cl100k_base, 8 matchers).
-- Single benchmark entry point `benchmarks/bm.mojo` with `-D BPE_PT=0/1/2` dispatch (env var `BPE_PT` in `run.sh`).
-- Level A pre-tokenizer alignment verified — all three match Python `regex` references on curated strings AND full corpus counts.
-- Level B end-to-end encode verification — `benchmarks/verify_encoding.py` produces identical token IDs on all 3 variants vs Python reference.
-- GPT4Pretokenizer bugs fixed: `_best_match` → first-match-wins; added missing matchers with backtracking.
-- GPT2Pretokenizer bug fixed: `_match_ws_not_before_nonws` backtracking.
-- **`BPE_CORPUS` env var** added: all 3 benchmarks (Mojo, Python tiktoken, Rust tiktoken-rs) read it; URLs auto-downloaded to temp file by `run.sh` via curl, cleaned up on EXIT. Default fallback: `benchmarks/corpus.txt`.
-- **`GAPS.md`**: comprehensive gap analysis vs bpe.mojo — incremental training stats, `.tiktoken` format, special tokens, byte_shuffle, pre-trained weights, Python-free save/load. All 6 gaps documented with background, mechanism details, bpe.mojo code snippets, and priority roadmap.
-- **`INCREMENTAL_STATS.md`**: detailed 456-line design doc for incremental pair stats — flat `List[Int]` with SEP=-1 sentinel, packed `Dict[Int,Int]` pair-frequency map, 5-ops-per-occurrence incremental update, full worked example, performance analysis.
-- **Incremental pair-stats implementation**: completed. Flat `List[Int]` with SEP=-1 replaces `Dict[String,List[Int]]` splits; packed `Dict[Int,Int]` pair-frequency map updated incrementally (5 ops per occurrence); single-pass merge scan replaces per-word rebuild. Old `_compute_pair_freqs()` and `_merge_pair()` helpers removed.
-- Key design: decode uses precomputed `token_bytes` (flat `List[UInt8]` with `unsafe_ptr()` for raw pointer), `token_offsets`, `token_lengths` with Ġ→0x20 pre-substitution during train/load. No structural change needed for storage — `memcpy` on `List[UInt8]` via `unsafe_ptr()` eliminates ARC overhead.
+- **Test file**: `/home/tenmoomnet/simple_bpe/tokenizer_tests.txt` — 510-line exhaustive test spec with 16 sections (~110 stubs: init, vocab, rank table, merges, training, incremental stats, encode, decode, roundtrip, special tokens, byte/unicode, .tiktoken I/O, cross-validation, property-based, performance, security/regression).
+- **Already covered**: 45 tests (36 `main.mojo` + 9 `tests/test_tokenizer.mojo`). Detailed audit in `TEST_IMPLEMENTATION_PLAN.md`.
+- **New tests planned**: ~20 Phase 1 (safe, no source changes), ~7 Phase 2 (needs validation/error-handling source changes), ~8 Phase 3 (complex edge cases, cross-validation).
+- **Source validation gaps identified**: `train()` lacks vocab_size<256 check; `_register_special_token()` accepts empty/duplicate strings; `decode()` no bounds check; `load_tiktoken()` no malformed-line/duplicate/missing-file checks; no untrained-state guard for `save_tiktoken`/`encode`/`decode`.
+- **45 existing tests pass** covering: pre-tokenizer alignment (all 3 variants, split counts), byte-level base vocab, encode/decode roundtrip, save/load JSON, determinism, Hugging Face corpus, .tiktoken format (structure, roundtrip, merge consistency, idempotency, JSON parity, all 3 PT variants, empty corpus, Unicode, zero merges), o200k_base interop (199,998 tokens), byte mapping (SEQUENTIAL/SHUFFLED roundtrip), special tokens (PT mappings, register, encode with/without, save/load, tiktoken skip, GPT2 auto-register, Wikipedia BPE example, single char, unicode roundtrip).
 
 ## Work State
 ### Completed
-- Decode profiling and optimization: sum pass, raw alloc, Ġ→0x20 pre-substitution, `memcpy` chain via `List.unsafe_ptr()` — 109.3 M tok/s (1.9× Rust).
-- PreTokenizer trait + 3 implementations in `pretokenizer.mojo` with full docs (arch diagram, trait contract, per-matcher regex mapping, edge-case notes).
-- GPT4Pretokenizer and GPT2Pretokenizer bugfixes (first-match-wins, matcher corrections, backtracking).
-- Level A (4 alignment tests in `main.mojo`) and Level B (`benchmarks/verify_encoding.py`) verification — all pass.
-- `BPE_CORPUS` env var with URL auto-download — supported by all 3 benchmarks (`benchmark.mojo`, `benchmark_tiktoken.py`, Rust `main.rs`), handled by `run.sh`.
-- `GAPS.md`: 6-gap analysis vs bpe.mojo (incremental stats, .tiktoken, special tokens, byte_shuffle, pre-trained weights, Python-free save/load).
-- `INCREMENTAL_STATS.md`: 456-line design doc with algorithm, worked example, performance analysis, bpe.mojo comparison.
-- **Incremental pair-stats training**: flat `List[Int]` + SEP sentinel replaces `Dict[String,List[Int]]` splits; packed `Dict[Int,Int]` with single-pass incremental update replaces O(V×W) `_compute_pair_freqs` + `_merge_pair` helpers. All 10 tests pass; benchmark confirms identical token count (475,384) with training at 975 ms.
+- All 3 phases of test implementation complete: 78 tests total (36 `main.mojo` + 9 `tests/test_tokenizer.mojo` + 33 `tests/exhaustive_tokenizer.mojo`). Coverage includes vocab integrity, training edge cases (emoji, mixed scripts, repeated chars, tie-breaking, oversized vocab), encode/decode (single byte, whitespace, large doc, stability, null byte, punctuation, unsplittable tokens), validation error-handling (vocab_size < 256, decode bounds, special token validation), property invariants (merge ranks, every-token-decodable), special token overlap, and byte/unicode edge cases.
+- `BENCHMARK_PLAN.md` — comprehensive benchmark plan: 5 corpora, 6 measurement dimensions, 6 comparison targets, scaling analysis, integrated cross-validation, unified output table, 13 prioritized implementation milestones.
 
 ### Active
-- **`.tiktoken` format support (gap #2)**: Design doc written (`TIKTOKEN_FORMAT.md`). Uses `from std.base64 import b64encode, b64decode` (stdlib, no copied module). 9-step plan: add `_bytes_key` / `_bpe` / `_recover_merges` → `save_tiktoken` → `load_tiktoken` → 3 tests → benchmark.
+- Benchmark infrastructure upgrades per `BENCHMARK_PLAN.md`
 
 ### Blocked
 - *(none)*
 
 ## Next Move
-1. **Implement `.tiktoken` format support** — see `TIKTOKEN_FORMAT.md` for the 10-step plan. Copy `encoding/base64.mojo` from bpe.mojo, then add `_bytes_key`, `_bpe`, `_recover_merges`, `save_tiktoken`, and `load_tiktoken` to `tokenizer.mojo`.
-2. Train bpe.mojo-style `BasicTokenizer` on same corpus, compare merge rules, token counts, and convergence behavior against our incremental implementation.
-3. Special-token support (gap #3 — `<|endoftext|>`, etc.).
-4. `byte_shuffle` support (gap #4 — byte-level roundtrip for arbitrary Unicode).
-5. Track metric: training throughput (vocab-steps/second) to quantify the incremental-stat speedup vs the old O(V×W) approach.
+1. **Split-only micro-benchmark** — measure `.split()` throughput in isolation for all 3 PT variants
+2. **Run all 3 PT variants in one invocation** — replace separate `-D` flag approach in `benchmark.mojo`
+3. **Time training with min-of-5** — reliable training throughput number
+4. **Cross-validate token IDs** — add to `run.sh`, reuse `verify_encoding.py`
+5. **Memory measurement** — `/proc/self/status` peak RSS before/after each phase
+6. **Scaling: vary vocab_size** — parameterize `train()` in benchmark loop
+7. **Unified comparison table** — structured JSON output, printed table by `run.sh`
 
 ## Relevant Files
-- `/home/tenmoomnet/simple_bpe/tokenizer.mojo`: 669 lines. `BPETokenizer[PT]` — `train()` (incremental pair stats), `encode()`, `decode()`, `PairCache`. Constants `ENCODE_SHIFT`, `ENCODE_MASK`, `SEP` at line 112.
-- `/home/tenmoomnet/simple_bpe/pretokenizer.mojo`: PreTokenizer trait + 3 implementations (GPre, GPT2 r50k_base, GPT4 cl100k_base), `_is_ascii_ws_byte`, first-match-wins `_best_match`.
-- `/home/tenmoomnet/simple_bpe/main.mojo`: 10 tests (6 original + 4 alignment).
-- `/home/tenmoomnet/simple_bpe/GAPS.md`: Gap analysis vs bpe.mojo — 6 gaps documented with priority roadmap.
-- `/home/tenmoomnet/simple_bpe/INCREMENTAL_STATS.md`: Detailed design doc for incremental pair stats — algorithm, worked example, performance analysis.
-- `/home/tenmoomnet/simple_bpe/TIKTOKEN_FORMAT.md`: Design doc for .tiktoken format support — save/load, merge recovery algorithm, base64 via stdlib (`b64encode`/`b64decode`), 9-step implementation plan.
+- `/home/tenmoomnet/simple_bpe/tokenizer.mojo`: ~979 lines. `BPETokenizer[PT]` — `train()`, `encode_ordinary()`, `encode()`, `decode()`, `save_tiktoken()`, `load_tiktoken()`, `PairCache`, `register_special_tokens()`.
+- `/home/tenmoomnet/simple_bpe/pretokenizer.mojo`: ~1260 lines. `ByteMapping` enum, `PreTokenizer` trait, comptime SIMD LUTs, 3 implementations.
+- `/home/tenmoomnet/simple_bpe/main.mojo`: ~810 lines, 36 tests.
+- `/home/tenmoomnet/simple_bpe/tests/test_tokenizer.mojo`: 177 lines, 9 tests (Wikipedia BPE example, single char, unicode roundtrip).
+- `/home/tenmoomnet/simple_bpe/tests/exhaustive_tokenizer.mojo`: ~490 lines, 33 tests (all phases).
+- `/home/tenmoomnet/simple_bpe/BENCHMARK_PLAN.md`: Comprehensive benchmark plan with 13 milestones.
+- `/home/tenmoomnet/simple_bpe/benchmarks/`: Benchmark suite — `benchmark.mojo` (shared helpers), `bm.mojo` (entry point), `benchmark_tiktoken.py` (Python reference), `benchmark_rust/` (Rust reference), `run.sh` (runner), `verify_encoding.py` (cross-validation), `reference_splits.py` (split alignment).
 - `/home/tenmoomnet/simple_bpe/SUMMARY.md`: This file — session summary and next moves.
-- `/home/tenmoomnet/simple_bpe/benchmarks/benchmark.mojo`: Shared helper `run[PT](label)`, reads `BPE_CORPUS` from env var.
-- `/home/tenmoomnet/simple_bpe/benchmarks/run.sh`: Runner with dependency install, URL download, `BPE_CORPUS` propagation, `BPE_PT` mapping to `-D` flags.
-- `/home/tenmoomnet/simple_bpe/benchmarks/benchmark_tiktoken.py`: Python tiktoken benchmark, reads `BPE_CORPUS` from env var.
-- `/home/tenmoomnet/simple_bpe/benchmarks/benchmark_rust/src/main.rs`: Rust tiktoken-rs benchmark, reads `BPE_CORPUS` env var (higher priority than CLI arg).
-- `/home/tenmoomnet/simple_bpe/PairCache.md`: Two-tier merge-lookup cache docs.
-- `/home/tenmoomnet/simple_bpe/PRETOKENIZER.md`: Pre-tokenizer analysis and migration docs.
-- `/home/tenmoomnet/simple_bpe/VERIFICATION.md`: Verification docs.
-- `/home/tenmoomnet/simple_bpe/AGENTS.md`: Agent guide.
-- `/home/tenmoomnet/../bpe.mojo/`: Sibling project. `BasicTokenizer` (pure byte-level BPE, incremental stats), `RegexTokenizer` (GPT-4 regex + special tokens + minbpe format), `GPT4Tokenizer` (tiktoken weight loading + byte_shuffle + recover_merges).

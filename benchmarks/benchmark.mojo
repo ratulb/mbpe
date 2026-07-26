@@ -1,15 +1,20 @@
-"""Shared benchmark helpers — parameterized by pre-tokenizer type.
+"""Shared benchmark helpers — split-only, full pipeline, multi-variant.
+Outputs JSON lines for each (variant, vocab_size) combination.
 
-Usage:  mojo -I . -D BPE_PT=N benchmarks/bm.mojo
-  N=0: GPreTokenizer   N=1: GPT2Pretokenizer   N=2: GPT4Pretokenizer
+Usage:  mojo -I . benchmarks/bm.mojo
 """
 
 from tokenizer import BPETokenizer
-from pretokenizer import PreTokenizer
+from pretokenizer import (
+    GPreTokenizer,
+    GPT2Pretokenizer,
+    GPT4Pretokenizer,
+    PreTokenizer,
+    ByteMapping,
+)
 from std.pathlib import Path
 from std.os import getenv
 from std.time import perf_counter_ns
-
 
 
 struct Timer:
@@ -33,98 +38,141 @@ def min_ns(times: List[Int]) -> Int:
     return best
 
 
-def fmt_ns(ns: Int) -> String:
-    if ns < 1000:
-        return String(ns) + " ns"
-    elif ns < 1_000_000:
-        return String(ns // 1000) + "." + String((ns % 1000) // 100) + " us"
-    elif ns < 1_000_000_000:
-        return (
-            String(ns // 1_000_000)
-            + "."
-            + String((ns % 1_000_000) // 100_000)
-            + " ms"
-        )
-    else:
-        return (
-            String(ns // 1_000_000_000)
-            + "."
-            + String((ns % 1_000_000_000) // 100_000_000)
-            + " s"
-        )
-
-
-def fmt_tok_s(tokens: Int, ns: Int) -> String:
+def fmt_mtok_s(tokens: Int, ns: Int) -> Float64:
     if ns == 0:
-        return "N/A"
-    var per_sec = tokens * 1_000_000_000 // ns
-    if per_sec >= 1_000_000:
-        return (
-            String(per_sec // 1_000_000)
-            + "."
-            + String((per_sec % 1_000_000) // 100_000)
-            + " M tok/s"
+        return 0.0
+    return Float64(tokens) / (Float64(ns) / 1_000_000_000.0) / 1_000_000.0
+
+
+def ns_to_ms(ns: Int) -> Float64:
+    return Float64(ns) / 1_000_000.0
+
+
+# ── Pre-tokenization split benchmark ──────────────────────────────
+
+@always_inline
+def measure_split_ns[PT: PreTokenizer](text: String) raises -> Tuple[Int, Int]:
+    var pt = PT()
+    var t0 = perf_counter_ns()
+    var words = pt.split(text)
+    var ns = Int(perf_counter_ns() - t0)
+    return (ns, len(words))
+
+
+# ── Full pipeline benchmark ───────────────────────────────────────
+
+def run_one[PT: PreTokenizer](
+    label: String,
+    corpus: Span[String, _],
+    full_text: String,
+    n_bytes: Int,
+    vocab_sizes: List[Int],
+) raises:
+    for vs in range(len(vocab_sizes)):
+        var vsize = vocab_sizes[vs]
+
+        # Training (single run for speed on large corpora)
+        var train_times = List[Int]()
+        for _ in range(1):
+            var t = BPETokenizer[PT]()
+            var t0 = perf_counter_ns()
+            t.train(corpus, vsize)
+            train_times.append(Int(perf_counter_ns() - t0))
+        var best_train_ns = min_ns(train_times)
+
+        var tok = BPETokenizer[PT]()
+        tok.train(corpus, vsize)
+        var ids = tok.encode(full_text)
+        var num_tokens = len(ids)
+
+        # Encode — best of 20
+        var encode_times = List[Int]()
+        _ = tok.encode(full_text)
+        for _ in range(20):
+            var t0 = perf_counter_ns()
+            _ = tok.encode(full_text)
+            encode_times.append(Int(perf_counter_ns() - t0))
+        var best_encode_ns = min_ns(encode_times)
+
+        # Decode — best of 20
+        var decode_times = List[Int]()
+        _ = tok.decode(ids)
+        for _ in range(20):
+            var t0 = perf_counter_ns()
+            _ = tok.decode(ids)
+            decode_times.append(Int(perf_counter_ns() - t0))
+        var best_decode_ns = min_ns(decode_times)
+
+        var n_merges = len(tok.merges)
+        var n_vocab = len(tok)
+        var train_merges_s = 0
+        if best_train_ns > 0:
+            train_merges_s = n_merges * 1_000_000_000 // best_train_ns
+
+        print(
+            '{"impl":"mojo","variant":"'
+            + label
+            + '","corpus_bytes":'
+            + String(n_bytes)
+            + ',"vocab_size":'
+            + String(vsize)
+            + ',"n_vocab":'
+            + String(n_vocab)
+            + ',"n_merges":'
+            + String(n_merges)
+            + ',"n_tokens":'
+            + String(num_tokens)
+            + ',"train_ms":'
+            + String(ns_to_ms(best_train_ns))
+            + ',"train_merges_s":'
+            + String(train_merges_s)
+            + ',"encode_ms":'
+            + String(ns_to_ms(best_encode_ns))
+            + ',"encode_mtok_s":'
+            + String(fmt_mtok_s(num_tokens, best_encode_ns))
+            + ',"decode_ms":'
+            + String(ns_to_ms(best_decode_ns))
+            + ',"decode_mtok_s":'
+            + String(fmt_mtok_s(num_tokens, best_decode_ns))
+            + "}"
         )
-    elif per_sec >= 1000:
-        return (
-            String(per_sec // 1000)
-            + "."
-            + String((per_sec % 1000) // 100)
-            + " K tok/s"
-        )
-    else:
-        return String(per_sec) + " tok/s"
 
 
-def run[PT: PreTokenizer](label: String) raises:
-    print("=" * 60)
-    print("  Mojo  — " + label)
-    print("=" * 60)
+# ── Unified runner ────────────────────────────────────────────────
 
+def run_all() raises:
     var corpus_path = getenv("BPE_CORPUS", "benchmarks/corpus.txt")
-    var corpus = Path(corpus_path).read_text()
-    var n_bytes = corpus.byte_length()
-    print("Corpus: " + String(n_bytes) + " bytes")
+    var full_text = Path(corpus_path).read_text()
+    var n_bytes = full_text.byte_length()
 
-    var lines = corpus.split("\n")
-    var train_corpus = List[String]()
+    # Build training corpus (non-empty lines)
+    var lines = full_text.split("\n")
+    var corpus = List[String]()
     for line in lines:
         var s = String(line)
         if s.byte_length() > 0:
-            train_corpus.append(s^)
+            corpus.append(s^)
 
-    print("Training (vocab_size=500)...")
-    var timer = Timer()
-    timer.start()
-    var tok = BPETokenizer[PT]()
-    tok.train(train_corpus, 500)
-    var train_ns = timer.elapsed_ns()
-    print("  train: " + fmt_ns(train_ns))
-    print("  vocab: " + String(len(tok)) + "  merges: " + String(len(tok.merges)))
+    var vocab_sizes: List[Int] = [500, 1000, 2000, 4000]
 
-    var ids = tok.encode(corpus)
-    var num_tokens = len(ids)
-    print("  tokens: " + String(num_tokens))
+    run_one[GPreTokenizer]("GPre", corpus, full_text, n_bytes, vocab_sizes)
+    run_one[GPT2Pretokenizer]("GPT2", corpus, full_text, n_bytes, vocab_sizes)
+    run_one[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]("GPT4", corpus, full_text, n_bytes, vocab_sizes)
 
-    print("\n── encode ──")
-    var encode_times = List[Int]()
-    var n_iters = 20
-    _ = tok.encode(corpus)
-    for _ in range(n_iters):
-        timer.start()
-        _ = tok.encode(corpus)
-        encode_times.append(timer.elapsed_ns())
-    var enc_best = min_ns(encode_times)
-    print("  best: " + fmt_ns(enc_best) + "  " + fmt_tok_s(num_tokens, enc_best))
 
-    print("\n── decode ──")
-    var decode_times = List[Int]()
-    _ = tok.decode(ids)
-    for _ in range(n_iters):
-        timer.start()
-        _ = tok.decode(ids)
-        decode_times.append(timer.elapsed_ns())
-    var dec_best = min_ns(decode_times)
-    print("  best: " + fmt_ns(dec_best) + "  " + fmt_tok_s(num_tokens, dec_best))
+# ── Legacy single-variant entry point ─────────────────────────────
 
-    print("\n" + "=" * 60)
+def run[PT: PreTokenizer](label: String) raises:
+    var corpus_path = getenv("BPE_CORPUS", "benchmarks/corpus.txt")
+    var full_text = Path(corpus_path).read_text()
+    var n_bytes = full_text.byte_length()
+
+    var lines = full_text.split("\n")
+    var corpus = List[String]()
+    for line in lines:
+        var s = String(line)
+        if s.byte_length() > 0:
+            corpus.append(s^)
+
+    var vocab_sizes: List[Int] = [500, 1000, 2000, 4000]
+    run_one[PT](label, corpus, full_text, n_bytes, vocab_sizes)

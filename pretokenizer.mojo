@@ -110,7 +110,7 @@ FILE STRUCTURE
 # hot loops -- inlining eliminates function-call overhead.
 
 @always_inline
-def _utf8_byte_length(lead: UInt8) -> Int:
+def utf8_byte_length(lead: UInt8) -> Int:
     """Return the byte-length of a UTF-8 codepoint given its leading byte.
 
     UTF-8 encoding:
@@ -135,7 +135,7 @@ def _utf8_byte_length(lead: UInt8) -> Int:
 
 
 @always_inline
-def _codepoint_at(ptr: UnsafePointer[UInt8, _], length: Int) -> Int:
+def decode_codepoint(ptr: UnsafePointer[UInt8, _], length: Int) -> Int:
     """Decode a single Unicode codepoint from raw UTF-8 bytes.
 
     Reads `length` bytes from `ptr` and reconstructs the codepoint.
@@ -143,7 +143,7 @@ def _codepoint_at(ptr: UnsafePointer[UInt8, _], length: Int) -> Int:
 
     Args:
         ptr: Pointer to the first byte of a UTF-8 encoding.
-        length: Number of bytes (1-4, from _utf8_byte_length).
+        length: Number of bytes (1-4, from utf8_byte_length).
 
     Returns:
         The decoded Unicode codepoint as an integer.
@@ -162,7 +162,7 @@ def _codepoint_at(ptr: UnsafePointer[UInt8, _], length: Int) -> Int:
 
 
 @always_inline
-def _is_letter(cp: Int) -> Bool:
+def is_letter(cp: Int) -> Bool:
     """Return True if cp is a Unicode letter (like \\p{L} in regex).
 
     Covers the most common scripts used in English, European, and CJK text:
@@ -220,13 +220,13 @@ def _is_letter(cp: Int) -> Bool:
 
 
 @always_inline
-def _is_digit(cp: Int) -> Bool:
+def is_digit(cp: Int) -> Bool:
     """Return True if cp is a Unicode digit (like \\p{N} in regex).
 
     Covers ASCII digits plus common digit scripts: Arabic-Indic, Devanagari,
     Bengali, Thai, Lao, Tibetan, and others.
 
-    Like _is_letter, this is NOT a complete \\p{N} match but covers the
+    Like is_letter, this is NOT a complete \\p{N} match but covers the
     digit ranges that appear in practice for English-heavy corpora.
     """
     return (
@@ -248,17 +248,17 @@ def _is_digit(cp: Int) -> Bool:
 
 
 @always_inline
-def _is_letter_or_digit(cp: Int) -> Bool:
+def is_letter_or_digit(cp: Int) -> Bool:
     """Return True if cp is a letter or digit.
 
-    Equivalent to _is_letter(cp) or _is_digit(cp).
+    Equivalent to is_letter(cp) or is_digit(cp).
     Used in character classes like [^...\\p{L}\\p{N}] in the regex patterns.
     """
-    return _is_letter(cp) or _is_digit(cp)
+    return is_letter(cp) or is_digit(cp)
 
 
 @always_inline
-def _is_whitespace(cp: Int) -> Bool:
+def is_whitespace(cp: Int) -> Bool:
     """Return True if cp is a Unicode whitespace codepoint.
 
     Covers: tab, newline, carriage return, space, plus non-break space,
@@ -303,7 +303,7 @@ def _is_whitespace(cp: Int) -> Bool:
 
 
 @always_inline
-def _is_ascii_ws_byte(b: Int) -> Bool:
+def is_ascii_ws_byte(b: Int) -> Bool:
     """Return True if byte b is an ASCII whitespace byte.
 
     Matches: \\t (0x09), \\n (0x0A), \\v (0x0B), \\f (0x0C),
@@ -312,7 +312,7 @@ def _is_ascii_ws_byte(b: Int) -> Bool:
     This is the byte-level version of \\s from the regex patterns.
     We use byte checks (not codepoint checks) because:
       - GPT-2/GPT-4 regex \\s matches ONLY ASCII whitespace bytes
-      - The _match_ws_* and _match_newline matchers operate on raw
+      - The match_ws_* and _match_newline matchers operate on raw
         bytes, not decoded codepoints
       - Byte-level comparisons are faster and avoid UTF-8 decoding
         overhead
@@ -339,6 +339,109 @@ def _is_ascii_ws_byte(b: Int) -> Bool:
 #
 # Only one method is required: split(text: String) -> List[String].
 
+# ── Byte mapping enum ─────────────────────────────────────────────────────
+# Identifies which byte→ID mapping a pre-tokenizer family uses.
+# SEQUENTIAL: rank = byte value (r50k_base, cl100k_base)
+# SHUFFLED:   permuted mapping (o200k_base — rank 0 = '!' not 0x00)
+
+@fieldwise_init
+struct ByteMapping(ImplicitlyCopyable & Equatable):
+    """Compile-time identifier for byte→ID mapping strategy.
+
+    Each pre-tokenizer declares which mapping it uses via a comptime
+    member.  This enables zero-cost branching in the encode hot path:
+    SEQUENTIAL maps rank = byte (identity), SHUFFLED uses a 256-entry
+    lookup table.
+    """
+
+    var _value: Int
+
+    comptime SEQUENTIAL = ByteMapping(0)
+    comptime SHUFFLED = ByteMapping(1)
+
+
+# ── Comptime LUTs for o200k_base ──────────────────────────────────────────
+# Derived from the first 256 entries of o200k_base.tiktoken.
+# O200K_BYTE_TO_ID[byte_value] = token_rank
+# O200K_ID_TO_BYTE[token_rank] = byte_value
+
+comptime O200K_BYTE_TO_ID = SIMD[DType.int32, 256](
+    188, 189, 190, 191, 192, 193, 194, 195,  # 0x00-0x07
+    196, 197, 198, 199, 200, 201, 202, 203,  # 0x08-0x0F
+    204, 205, 206, 207, 208, 209, 210, 211,  # 0x10-0x17
+    212, 213, 214, 215, 216, 217, 218, 219,  # 0x18-0x1F
+    220,  # 0x20 (space)
+    0, 1, 2, 3, 4, 5, 6, 7,  # 0x21-0x28
+    8, 9, 10, 11, 12, 13, 14, 15,  # 0x29-0x30
+    16, 17, 18, 19, 20, 21, 22, 23,  # 0x31-0x38
+    24, 25, 26, 27, 28, 29, 30, 31,  # 0x39-0x40
+    32, 33, 34, 35, 36, 37, 38, 39,  # 0x41-0x48
+    40, 41, 42, 43, 44, 45, 46, 47,  # 0x49-0x50
+    48, 49, 50, 51, 52, 53, 54, 55,  # 0x51-0x58
+    56, 57, 58, 59, 60, 61, 62, 63,  # 0x59-0x60
+    64, 65, 66, 67, 68, 69, 70, 71,  # 0x61-0x68
+    72, 73, 74, 75, 76, 77, 78, 79,  # 0x69-0x70
+    80, 81, 82, 83, 84, 85, 86, 87,  # 0x71-0x78
+    88, 89, 90, 91, 92, 93,  # 0x79-0x7E
+    221,  # 0x7F (DEL)
+    222, 223, 224, 225, 226, 227, 228, 229,  # 0x80-0x87
+    230, 231, 232, 233, 234, 235, 236, 237,  # 0x88-0x8F
+    238, 239, 240, 241, 242, 243, 244, 245,  # 0x90-0x97
+    246, 247, 248, 249, 250, 251, 252, 253,  # 0x98-0x9F
+    254,  # 0xA0
+    94, 95, 96, 97, 98, 99, 100, 101,  # 0xA1-0xA8
+    102, 103, 104, 105,  # 0xA9-0xAC
+    255,  # 0xAD
+    106, 107, 108, 109, 110, 111, 112, 113,  # 0xAE-0xB7
+    114, 115, 116, 117, 118, 119, 120, 121,  # 0xB8-0xBF
+    122, 123, 124, 125, 126, 127, 128, 129,  # 0xC0-0xC7
+    130, 131, 132, 133, 134, 135, 136, 137,  # 0xC8-0xCF
+    138, 139, 140, 141, 142, 143, 144, 145,  # 0xD0-0xD7
+    146, 147, 148, 149, 150, 151, 152, 153,  # 0xD8-0xDF
+    154, 155, 156, 157, 158, 159, 160, 161,  # 0xE0-0xE7
+    162, 163, 164, 165, 166, 167, 168, 169,  # 0xE8-0xEF
+    170, 171, 172, 173, 174, 175, 176, 177,  # 0xF0-0xF7
+    178, 179, 180, 181, 182, 183, 184, 185,  # 0xF8-0xFF
+    186, 187,  # padding to 256
+)
+
+comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
+    0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,  # rank 0-7
+    0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30,  # rank 8-15
+    0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,  # rank 16-23
+    0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40,  # rank 24-31
+    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,  # rank 32-39
+    0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50,  # rank 40-47
+    0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,  # rank 48-55
+    0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60,  # rank 56-63
+    0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,  # rank 64-71
+    0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70,  # rank 72-79
+    0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78,  # rank 80-87
+    0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E,  # rank 88-93
+    0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8,  # rank 94-101
+    0xA9, 0xAA, 0xAB, 0xAC, 0xAE, 0xAF, 0xB0, 0xB1,  # rank 102-109
+    0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9,  # rank 110-117
+    0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xC1,  # rank 118-125
+    0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9,  # rank 126-133
+    0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1,  # rank 134-141
+    0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9,  # rank 142-149
+    0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1,  # rank 150-157
+    0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9,  # rank 158-165
+    0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF, 0xF0, 0xF1,  # rank 166-173
+    0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9,  # rank 174-181
+    0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,  # rank 182-187
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,  # rank 188-195
+    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,  # rank 196-203
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,  # rank 204-211
+    0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,  # rank 212-219
+    0x20,  # rank 220
+    0x7F, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86,  # rank 221-228
+    0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E,  # rank 229-236
+    0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96,  # rank 237-244
+    0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E,  # rank 245-252
+    0x9F, 0xA0, 0xAD,  # rank 253-255
+)
+
 trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable):
     """Split raw text into "words" for BPE training and encoding.
 
@@ -360,7 +463,44 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable):
     The returned list contains UTF-8 string slices, one per "word".
     Each word will be encoded as a sequence of byte-level token IDs
     (0-255) before BPE merge rules are applied.
+
+    Byte mapping
+    ------------
+    Each pre-tokenizer declares which byte→ID mapping it uses via the
+    comptime ``byte_map`` member.  The ``byte_to_id`` and ``id_to_byte``
+    static methods convert between raw byte values (0-255) and base
+    token ranks.  For SEQUENTIAL mapping (r50k, cl100k), rank = byte.
+    For SHUFFLED mapping (o200k), a 256-entry lookup table is used.
+
+    Shared whitespace matchers
+    --------------------------
+    The trait provides three default static methods that implement the
+    whitespace-matching logic common to both GPT-2 r50k_base and GPT-4
+    cl100k_base pre-tokenizers.  Family-specific matchers (contractions,
+    letter runs, digit runs, punctuation runs, newlines) remain on
+    each concrete implementation.
     """
+
+    # ── byte mapping (required comptime member) ──────────────────────
+    comptime byte_map: ByteMapping
+
+    @staticmethod
+    def byte_to_id(b: Int) -> Int:
+        """Convert a raw byte value (0-255) to its base token rank.
+
+        Default: identity mapping (rank = byte).  Override for shuffled
+        mappings (e.g., o200k_base).
+        """
+        return b
+
+    @staticmethod
+    def id_to_byte(rank: Int) -> Int:
+        """Convert a base token rank (0-255) back to its raw byte value.
+
+        Default: identity mapping (byte = rank).  Override for shuffled
+        mappings (e.g., o200k_base).
+        """
+        return rank
 
     def split(self, text: String) raises -> List[String]:
         """Split text into words according to this pre-tokenizer's rules.
@@ -374,6 +514,92 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable):
             of the input byte span).
         """
         ...
+
+    @staticmethod
+    def special_tokens() -> Dict[String, Int]:
+        ...
+
+    # ── shared whitespace matchers (default implementations) ─────────
+    # These are functionally identical between GPT-2 r50k_base and GPT-4
+    # cl100k_base pre-tokenizers.  Family-specific matchers (contractions,
+    # letter/digit/punct runs, newlines) remain on each concrete struct.
+
+    @staticmethod
+    def match_trailing_all_ws(span: Span[UInt8, _], pos: Int) -> Int:
+        """Match alternative 5: \\s++$.
+
+        Matches if ALL remaining bytes from pos to end-of-string are
+        ASCII whitespace.  Returns the match length (entire remaining
+        span) or 0 if any non-whitespace byte follows.
+
+        Args:
+            span: The full UTF-8 byte span of the input text.
+            pos: Current position in the span.
+
+        Returns:
+            Number of bytes matched, or 0 if no match.
+        """
+        var n = len(span)
+        var i = pos
+        var count = 0
+        while i < n:
+            if not is_ascii_ws_byte(Int(span[i])):
+                return 0
+            count += 1
+            i += 1
+        return count
+
+    @staticmethod
+    def match_ws_not_before_nonws(span: Span[UInt8, _], pos: Int) -> Int:
+        """Match whitespace run where the byte AFTER is also whitespace (or EOS).
+
+        Approximates the regex negative lookahead (?!\\S).  Scans the
+        full ASCII-whitespace run, then shrinks from the right until
+        the post-match byte IS whitespace or end-of-string.
+
+        Args:
+            span: The full UTF-8 byte span of the input text.
+            pos: Current position in the span.
+
+        Returns:
+            Number of bytes matched, or 0 if no match.
+        """
+        var n = len(span)
+        if pos >= n:
+            return 0
+        if not is_ascii_ws_byte(Int(span[pos])):
+            return 0
+        var end = pos
+        while end < n and is_ascii_ws_byte(Int(span[end])):
+            end += 1
+        var total = end - pos
+        var ws_len = total
+        while ws_len >= 1:
+            var next_pos = pos + ws_len
+            if next_pos >= n or is_ascii_ws_byte(Int(span[next_pos])):
+                return ws_len
+            ws_len -= 1
+        return 0
+
+    @staticmethod
+    def match_single_ws(span: Span[UInt8, _], pos: Int) -> Int:
+        """Match a single ASCII whitespace byte.
+
+        Catch-all fallback for whitespace bytes not matched by the
+        trailing-ws or ws-before-nonws alternatives.
+
+        Args:
+            span: The full UTF-8 byte span of the input text.
+            pos: Current position in the span.
+
+        Returns:
+            1 if whitespace, 0 otherwise.
+        """
+        if pos >= len(span):
+            return 0
+        if is_ascii_ws_byte(Int(span[pos])):
+            return 1
+        return 0
 
 
 # ===========================================================================
@@ -398,8 +624,14 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable):
 # GPT2Pretokenizer or GPT4Pretokenizer for accuracy.
 
 struct GPreTokenizer(PreTokenizer):
+    comptime byte_map: ByteMapping = ByteMapping.SEQUENTIAL
+
     def __init__(out self):
         pass
+
+    @staticmethod
+    def special_tokens() -> Dict[String, Int]:
+        return Dict[String, Int]()
 
     @staticmethod
     def tokenize[
@@ -464,8 +696,16 @@ struct GPreTokenizer(PreTokenizer):
 # All whitespace is kept as-is in the output tokens -- no G substitution.
 
 struct GPT2Pretokenizer(PreTokenizer):
+    comptime byte_map: ByteMapping = ByteMapping.SEQUENTIAL
+
     def __init__(out self):
         pass
+
+    @staticmethod
+    def special_tokens() -> Dict[String, Int]:
+        var d = Dict[String, Int]()
+        d["<|endoftext|>"] = 50256
+        return d^
 
     @staticmethod
     @always_inline
@@ -531,9 +771,9 @@ struct GPT2Pretokenizer(PreTokenizer):
         var found = False
         while i < n:
             var lead = span[i]
-            var cplen = _utf8_byte_length(lead)
-            var cp = _codepoint_at(span.unsafe_ptr() + i, cplen)
-            if _is_letter(cp):
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if is_letter(cp):
                 found = True
                 i += cplen
             else:
@@ -570,9 +810,9 @@ struct GPT2Pretokenizer(PreTokenizer):
         var found = False
         while i < n:
             var lead = span[i]
-            var cplen = _utf8_byte_length(lead)
-            var cp = _codepoint_at(span.unsafe_ptr() + i, cplen)
-            if _is_digit(cp):
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if is_digit(cp):
                 found = True
                 i += cplen
             else:
@@ -609,107 +849,15 @@ struct GPT2Pretokenizer(PreTokenizer):
         var found = False
         while i < n:
             var lead = span[i]
-            var cplen = _utf8_byte_length(lead)
-            var cp = _codepoint_at(span.unsafe_ptr() + i, cplen)
-            if _is_whitespace(cp) or _is_letter_or_digit(cp):
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if is_whitespace(cp) or is_letter_or_digit(cp):
                 break
             found = True
             i += cplen
         if not found:
             return 0
         return i - pos
-
-    @staticmethod
-    @always_inline
-    def _match_trailing_ws(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match alternative 5: \\s++$.
-
-        Matches if ALL remaining bytes from pos to end-of-string are
-        ASCII whitespace.  This corresponds to "whitespace at EOF" --
-        the match must reach the end of input.
-
-        Returns the match length (entire remaining span) or 0 if any
-        non-whitespace byte follows.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
-        """
-        var n = len(span)
-        var count = 0
-        for i in range(pos, n):
-            if not _is_ascii_ws_byte(Int(span[i])):
-                return 0
-            count += 1
-        return count
-
-    @staticmethod
-    @always_inline
-    def _match_ws_not_before_nonws(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match alternative 6: \\s+(?!\\S).
-
-        Matches a whitespace run where the byte immediately after the
-        match is ALSO whitespace (or end-of-string).  This approximates
-        the regex negative lookahead (?!\\S) -- match only if the next
-        character is NOT non-whitespace.
-
-        Algorithm:
-          1. Scan the full ASCII-whitespace run starting at pos
-          2. Try the full run as a match
-          3. If the byte after the match is non-whitespace, shrink the
-             match from the right until the post-match byte IS
-             whitespace or EOS
-          4. If even a single-byte match fails, return 0
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
-        """
-        var n = len(span)
-        if pos >= n:
-            return 0
-        if not _is_ascii_ws_byte(Int(span[pos])):
-            return 0
-        var end = pos
-        while end < n and _is_ascii_ws_byte(Int(span[end])):
-            end += 1
-        var total = end - pos
-        var ws_len = total
-        while ws_len >= 1:
-            var next_pos = pos + ws_len
-            if next_pos >= n or _is_ascii_ws_byte(Int(span[next_pos])):
-                return ws_len
-            ws_len -= 1
-        return 0
-
-    @staticmethod
-    @always_inline
-    def _match_single_ws(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match alternative 7: \\s.
-
-        Matches a single ASCII whitespace byte.  This is the catch-all
-        fallback for whitespace bytes not matched by alternatives 5 or 6.
-
-        Returns 1 if the byte at pos is ASCII whitespace, else 0.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            1 if whitespace, 0 otherwise.
-        """
-        if pos >= len(span):
-            return 0
-        if _is_ascii_ws_byte(Int(span[pos])):
-            return 1
-        return 0
 
     @staticmethod
     def _best_match(span: Span[UInt8, _], pos: Int) raises -> Int:
@@ -727,7 +875,7 @@ struct GPT2Pretokenizer(PreTokenizer):
         Returns:
             The match length in bytes, or 0 if no matcher matched.
             When 0 is returned, the caller (split()) falls back to
-            consuming a single codepoint via _utf8_byte_length().
+            consuming a single codepoint via utf8_byte_length().
         """
         var m = GPT2Pretokenizer._match_contraction(span, pos)
         if m > 0:
@@ -741,13 +889,13 @@ struct GPT2Pretokenizer(PreTokenizer):
         m = GPT2Pretokenizer._match_punct_run(span, pos)
         if m > 0:
             return m
-        m = GPT2Pretokenizer._match_trailing_ws(span, pos)
+        m = Self.match_trailing_all_ws(span, pos)
         if m > 0:
             return m
-        m = GPT2Pretokenizer._match_ws_not_before_nonws(span, pos)
+        m = Self.match_ws_not_before_nonws(span, pos)
         if m > 0:
             return m
-        return GPT2Pretokenizer._match_single_ws(span, pos)
+        return Self.match_single_ws(span, pos)
 
     def split(self, text: String) raises -> List[String]:
         """Split text into words using the GPT-2 r50k_base pattern.
@@ -774,7 +922,7 @@ struct GPT2Pretokenizer(PreTokenizer):
         while pos < n:
             var best_len = GPT2Pretokenizer._best_match(span, pos)
             if best_len == 0:
-                best_len = _utf8_byte_length(span[pos])
+                best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos:pos + best_len]
             result.append(String(from_utf8_lossy=byte_span))
             pos += best_len
@@ -806,9 +954,53 @@ struct GPT2Pretokenizer(PreTokenizer):
 #   - Explicit newline matcher: \s*[\r\n]
 #   - 8 alternatives (vs 7 for GPT-2)
 
-struct GPT4Pretokenizer(PreTokenizer):
+struct GPT4Pretokenizer[
+    mapping: ByteMapping = ByteMapping.SEQUENTIAL,
+](PreTokenizer):
+    comptime byte_map: ByteMapping = Self.mapping
+
     def __init__(out self):
         pass
+
+    @staticmethod
+    def special_tokens() -> Dict[String, Int]:
+        comptime if Self.mapping == ByteMapping.SEQUENTIAL:
+            var d = Dict[String, Int]()
+            d["<|endoftext|>"] = 100257
+            d["<|fim_prefix|>"] = 100258
+            d["<|fim_middle|>"] = 100259
+            d["<|fim_suffix|>"] = 100260
+            d["<|endofprompt|>"] = 100276
+            return d^
+        else:
+            var d = Dict[String, Int]()
+            d["<|endoftext|>"] = 199999
+            d["<|endofprompt|>"] = 200018
+            return d^
+
+    @staticmethod
+    def byte_to_id(b: Int) -> Int:
+        """Raw byte (0-255) → base token rank.
+
+        For SEQUENTIAL: identity (rank = byte).
+        For SHUFFLED (o200k): 256-entry comptime LUT.
+        """
+        comptime if Self.mapping == ByteMapping.SHUFFLED:
+            return Int(O200K_BYTE_TO_ID[b])
+        else:
+            return b
+
+    @staticmethod
+    def id_to_byte(rank: Int) -> Int:
+        """Base token rank → raw byte (0-255).
+
+        For SEQUENTIAL: identity (byte = rank).
+        For SHUFFLED (o200k): 256-entry comptime LUT.
+        """
+        comptime if Self.mapping == ByteMapping.SHUFFLED:
+            return Int(O200K_ID_TO_BYTE[rank])
+        else:
+            return rank
 
     @staticmethod
     @always_inline
@@ -878,16 +1070,16 @@ struct GPT4Pretokenizer(PreTokenizer):
         if i >= n:
             return 0
         var lead = span[i]
-        var cplen = _utf8_byte_length(lead)
-        var cp = _codepoint_at(span.unsafe_ptr() + i, cplen)
-        if cp != 0x000A and cp != 0x000D and not _is_letter_or_digit(cp):
+        var cplen = utf8_byte_length(lead)
+        var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
             i += cplen
         var found_letters = False
         while i < n:
             var cur_lead = span[i]
-            var cur_len = _utf8_byte_length(cur_lead)
-            var cur_cp = _codepoint_at(span.unsafe_ptr() + i, cur_len)
-            if _is_letter(cur_cp):
+            var cur_len = utf8_byte_length(cur_lead)
+            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+            if is_letter(cur_cp):
                 found_letters = True
                 i += cur_len
             else:
@@ -923,9 +1115,9 @@ struct GPT4Pretokenizer(PreTokenizer):
         var count = 0
         while i < n and count < 3:
             var lead = span[i]
-            var cplen = _utf8_byte_length(lead)
-            var cp = _codepoint_at(span.unsafe_ptr() + i, cplen)
-            if _is_digit(cp):
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if is_digit(cp):
                 count += 1
                 i += cplen
             else:
@@ -963,9 +1155,9 @@ struct GPT4Pretokenizer(PreTokenizer):
         var found_punct = False
         while i < n:
             var lead = span[i]
-            var cplen = _utf8_byte_length(lead)
-            var cp = _codepoint_at(span.unsafe_ptr() + i, cplen)
-            if _is_whitespace(cp) or _is_letter_or_digit(cp):
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if is_whitespace(cp) or is_letter_or_digit(cp):
                 break
             found_punct = True
             i += cplen
@@ -1007,7 +1199,7 @@ struct GPT4Pretokenizer(PreTokenizer):
         if pos >= n:
             return 0
         var end = pos
-        while end < n and _is_ascii_ws_byte(Int(span[end])):
+        while end < n and is_ascii_ws_byte(Int(span[end])):
             end += 1
         var total = end - pos
         if total == 0:
@@ -1018,138 +1210,6 @@ struct GPT4Pretokenizer(PreTokenizer):
             if last_b == 10 or last_b == 13:
                 return ws_len
             ws_len -= 1
-        return 0
-
-    @staticmethod
-    @always_inline
-    def _match_whitespace(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match a non-newline ASCII whitespace run.
-
-        Matches ASCII whitespace bytes that are NOT CR or LF:
-        space (0x20), tab (0x09), vtab (0x0B), formfeed (0x0C).
-
-        This is used internally by _match_trailing_all_ws to handle
-        the case where we need to distinguish non-newline ws from
-        the newline matcher.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
-        """
-        var n = len(span)
-        var i = pos
-        if i >= n:
-            return 0
-        var count = 0
-        while i < n:
-            var b = Int(span[i])
-            if b == 32 or b == 9 or b == 11 or b == 12:
-                count += 1
-                i += 1
-            else:
-                break
-        if count == 0:
-            return 0
-        return count
-
-    @staticmethod
-    @always_inline
-    def _match_trailing_all_ws(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match alternative 5: \\s++$.
-
-        Like GPT-2 alt 5: matches only if ALL bytes from pos to EOF
-        are ASCII whitespace (including CR and LF).  If any non-ws
-        byte follows, returns 0.
-
-        This is separated from _match_whitespace because it checks
-        the "everything to EOF is ws" condition, not just "next
-        character is ws".
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
-        """
-        var n = len(span)
-        var i = pos
-        var count = 0
-        while i < n:
-            var b = Int(span[i])
-            if b == 32 or b == 9 or b == 11 or b == 12 or b == 13 or b == 10:
-                count += 1
-                i += 1
-            else:
-                return 0
-        return count
-
-    @staticmethod
-    @always_inline
-    def _match_ws_not_before_nonws(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match alternative 7: \\s+(?!\\S).
-
-        Same semantics as GPT-2 alt 6: matches a whitespace run where
-        the byte after the match is also whitespace or EOS.
-
-        The byte check includes CR and LF in addition to the other
-        ASCII ws bytes (same as GPT-2's version via _is_ascii_ws_byte).
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
-        """
-        var n = len(span)
-        if pos >= n:
-            return 0
-        var b = Int(span[pos])
-        if not (b == 32 or b == 9 or b == 11 or b == 12 or b == 13 or b == 10):
-            return 0
-        var end = pos
-        while end < n:
-            var bb = Int(span[end])
-            if bb == 32 or bb == 9 or bb == 11 or bb == 12 or bb == 13 or bb == 10:
-                end += 1
-            else:
-                break
-        var total = end - pos
-        var ws_len = total
-        while ws_len >= 1:
-            var next_pos = pos + ws_len
-            if next_pos >= n:
-                return ws_len
-            var nb = Int(span[next_pos])
-            if nb == 32 or nb == 9 or nb == 11 or nb == 12 or nb == 13 or nb == 10:
-                return ws_len
-            ws_len -= 1
-        return 0
-
-    @staticmethod
-    @always_inline
-    def _match_single_ws(span: Span[UInt8, _], pos: Int) -> Int:
-        """Match alternative 8: \\s.
-
-        Catch-all for any single ASCII whitespace byte not matched by
-        earlier alternatives.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            1 if whitespace, 0 otherwise.
-        """
-        if pos >= len(span):
-            return 0
-        var b = Int(span[pos])
-        if b == 32 or b == 9 or b == 11 or b == 12 or b == 13 or b == 10:
-            return 1
         return 0
 
     @staticmethod
@@ -1167,7 +1227,7 @@ struct GPT4Pretokenizer(PreTokenizer):
         Returns:
             The match length in bytes, or 0 if no matcher matched.
             When 0 is returned, the caller (split()) falls back to
-            consuming a single codepoint via _utf8_byte_length().
+            consuming a single codepoint via utf8_byte_length().
         """
         var m = GPT4Pretokenizer._match_contraction(span, pos)
         if m > 0:
@@ -1181,16 +1241,16 @@ struct GPT4Pretokenizer(PreTokenizer):
         m = GPT4Pretokenizer._match_punct_run(span, pos)
         if m > 0:
             return m
-        m = GPT4Pretokenizer._match_trailing_all_ws(span, pos)
+        m = Self.match_trailing_all_ws(span, pos)
         if m > 0:
             return m
         m = GPT4Pretokenizer._match_newline(span, pos)
         if m > 0:
             return m
-        m = GPT4Pretokenizer._match_ws_not_before_nonws(span, pos)
+        m = Self.match_ws_not_before_nonws(span, pos)
         if m > 0:
             return m
-        return GPT4Pretokenizer._match_single_ws(span, pos)
+        return Self.match_single_ws(span, pos)
 
     def split(self, text: String) raises -> List[String]:
         """Split text into words using the GPT-4 cl100k_base pattern.
@@ -1217,7 +1277,7 @@ struct GPT4Pretokenizer(PreTokenizer):
         while pos < n:
             var best_len = GPT4Pretokenizer._best_match(span, pos)
             if best_len == 0:
-                best_len = _utf8_byte_length(span[pos])
+                best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos:pos + best_len]
             result.append(String(from_utf8_lossy=byte_span))
             pos += best_len

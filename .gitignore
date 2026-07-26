@@ -15,6 +15,13 @@ benchmarks/benchmark_rust/target/
 # benchmark output files
 benchmarks/*_result.txt
 
+# generated corpora (regenerate via benchmarks/generate_corpora.py)
+benchmarks/corpus_*KB.txt
+benchmarks/corpus_*MB.txt
+
+# benchmark result data
+benchmarks/results/
+
 # Python cache
 __pycache__/
 *.pyc

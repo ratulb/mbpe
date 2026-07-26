@@ -1,132 +1,124 @@
 #!/usr/bin/env bash
-# runner for simple_bpe benchmarks.
-# Installs dependencies (tiktoken pip package, Rust toolchain) then runs each
-# benchmark and prints a comparison table.
+# Runner for simple_bpe benchmarks.
+# Orchestrates Mojo, Python tiktoken, and Rust tiktoken-rs across
+# multiple corpus sizes and vocab sizes.
 #
 # Usage:  bash benchmarks/run.sh
+#   BPE_NO_RUST=1  skip Rust benchmark
+#   BPE_SKIP_PY=1  skip Python benchmark
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BMDIR="benchmarks"
 
+# ── Config ───────────────────────────────────────────────────────
+CORPORA=(
+    "corpus_10KB.txt:10KB"
+    "corpus_100KB.txt:100KB"
+    "corpus_500KB.txt:500KB"
+    "corpus_1MB.txt:1MB"
+    "corpus_2MB.txt:2MB"
+    "corpus_5MB.txt:5MB"
+)
+RESULTS_DIR="$BMDIR/results"
+
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  simple_bpe  —  Multi-language Benchmark Suite              ║"
+echo "║  simple_bpe  —  Multi-Language Benchmark Suite              ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
-# ── 1. Install tiktoken (Python pip) ──────────────────────────────
+# ── Check dependencies ───────────────────────────────────────────
 echo ""
-echo "── [1/3] Installing Python tiktoken ──"
-if python -c "import tiktoken" 2>/dev/null; then
-    echo "  tiktoken already installed"
+echo "── Dependencies ──"
+
+# Mojo
+if command -v mojo &>/dev/null; then
+    echo "  Mojo: $(mojo --version 2>&1 | head -1 | cut -d' ' -f3)"
 else
-    echo "  Installing tiktoken via pip..."
-    pip install tiktoken 2>&1 | tail -1
+    echo "  ERROR: Mojo not found. Activate pixi shell first."
+    exit 1
 fi
 
-# ── 2. Install Rust (if needed) ───────────────────────────────────
-echo ""
-echo "── [2/3] Installing Rust toolchain ──"
-if command -v rustc &>/dev/null; then
-    echo "  Rust $(rustc --version) already installed"
+# Python tiktoken
+if pixi run python -c "import tiktoken" 2>/dev/null; then
+    echo "  Python tiktoken: $(pixi run python -c 'import tiktoken; print(tiktoken.__version__)')"
 else
-    echo "  Installing rustup (Rust toolchain installer)..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y 2>&1 | tail -3
-    source "$HOME/.cargo/env"
-    echo "  Rust $(rustc --version) installed"
+    echo "  Installing tiktoken..."
+    pixi run python -m ensurepip --upgrade 2>&1 | tail -1
+    pixi run python -m pip install tiktoken 2>&1 | tail -1
 fi
 
-# ── 3. Build Rust benchmark ───────────────────────────────────────
-echo ""
-echo "── [3/3] Building Rust benchmark ──"
-(cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -2)
-
-# ── Resolve corpus (path or URL) ──────────────────────────────────
-# BPE_CORPUS env var can be a file path or an http(s) URL.
-# If URL, download to a temp file (cleaned up on exit).
-echo ""
-echo "── Corpus ──"
-if [ -z "${BPE_CORPUS:-}" ]; then
-    BPE_CORPUS="$BMDIR/corpus.txt"
-    echo "  default: $BPE_CORPUS"
-elif [[ "$BPE_CORPUS" =~ ^https?:// ]]; then
-    echo "  downloading: $BPE_CORPUS"
-    tmp=$(mktemp /tmp/bpe_corpus.XXXXXX)
-    curl -sL "$BPE_CORPUS" > "$tmp"
-    echo "  saved to: $tmp ($(wc -c < "$tmp") bytes)"
-    trap 'rm -f "$tmp"' EXIT
-    BPE_CORPUS="$tmp"
+# Rust
+if command -v cargo &>/dev/null && [ -z "${BPE_NO_RUST:-}" ]; then
+    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$(pixi run which gcc)"
+    echo "  Rust: $(cargo --version)  linker: $CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER"
+    (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1)
+    echo "  Rust benchmark built"
 else
-    echo "  using: $BPE_CORPUS"
+    echo "  Rust: skipped (cargo not found or BPE_NO_RUST=1)"
 fi
-export BPE_CORPUS
 
-# ═══════════════════════════════════════════════════════════════════
+# ── Generate corpora ─────────────────────────────────────────────
 echo ""
+echo "── Corpora ──"
+pixi run python "$BMDIR/generate_corpora.py" 2>&1
+
+# ── Run benchmarks ───────────────────────────────────────────────
+mkdir -p "$RESULTS_DIR"
+
+for corpus_spec in "${CORPORA[@]}"; do
+    CORPUS_FILE="${corpus_spec%%:*}"
+    CORPUS_LABEL="${corpus_spec##*:}"
+    CORPUS_PATH="$BMDIR/$CORPUS_FILE"
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Corpus: $CORPUS_LABEL ($(wc -c < "$CORPUS_PATH") bytes)"
+    echo "═══════════════════════════════════════════════════════════"
+
+    export BPE_CORPUS="$CORPUS_PATH"
+
+    MOJO_OUT="$RESULTS_DIR/mojo_${CORPUS_LABEL}.json"
+    PY_OUT="$RESULTS_DIR/py_${CORPUS_LABEL}.json"
+    RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
+
+    # Mojo
+    echo "  [1/3] Mojo..."
+    pixi run mojo -I . "$BMDIR/bm.mojo" > "$MOJO_OUT" 2>/dev/null
+    echo "    $(wc -l < "$MOJO_OUT") results"
+
+    # Python tiktoken
+    echo "  [2/3] Python tiktoken..."
+    pixi run python "$BMDIR/benchmark_tiktoken.py" > "$PY_OUT" 2>/dev/null
+    echo "    $(wc -l < "$PY_OUT") results"
+
+    # Rust tiktoken-rs
+    if command -v cargo &>/dev/null && [ -z "${BPE_NO_RUST:-}" ]; then
+        echo "  [3/3] Rust tiktoken-rs..."
+        source "$HOME/.cargo/env"
+        "$BMDIR/benchmark_rust/target/release/benchmark_rust" > "$RS_OUT" 2>/dev/null
+        echo "    $(wc -l < "$RS_OUT") results"
+    else
+        echo "  [3/3] Rust tiktoken-rs: skipped"
+        echo "{}" > "$RS_OUT"
+    fi
+done
+
+# ── Collate ──────────────────────────────────────────────────────
 echo ""
-echo "═══════════════════════════════════════════════════════════════"
-echo "  Running Benchmarks"
-echo "═══════════════════════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════════════"
+echo "  Results"
+echo "═══════════════════════════════════════════════════════════"
 
-MOJO_RESULT=$BMDIR/mojo_result.txt
-PY_RESULT=$BMDIR/py_result.txt
-RS_RESULT=$BMDIR/rs_result.txt
+for corpus_spec in "${CORPORA[@]}"; do
+    CORPUS_LABEL="${corpus_spec##*:}"
+    MOJO_OUT="$RESULTS_DIR/mojo_${CORPUS_LABEL}.json"
+    PY_OUT="$RESULTS_DIR/py_${CORPUS_LABEL}.json"
+    RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
 
-# ── Select pre-tokenizer via -D BPE_PT=N comptime flag ───────────
-#   N=0: GPreTokenizer (default)   N=1: GPT2Pretokenizer   N=2: GPT4Pretokenizer
-case "${BPE_PT:-default}" in
-  gpt2|1) BPE_VAL=1; MOJO_LABEL="BPETokenizer[GPT2Pretokenizer]" ;;
-  gpt4|2) BPE_VAL=2; MOJO_LABEL="BPETokenizer[GPT4Pretokenizer]" ;;
-  *)      BPE_VAL=0; MOJO_LABEL="BPETokenizer[GPreTokenizer]" ;;
-esac
+    echo ""
+    pixi run python "$BMDIR/collate.py" "$MOJO_OUT" "$PY_OUT" "$RS_OUT"
+done
 
-# ── Mojo ──────────────────────────────────────────────────────────
 echo ""
-echo "───────────────────────────────────────────────────────────────"
-echo "  1/3  Mojo  ($MOJO_LABEL)"
-echo "───────────────────────────────────────────────────────────────"
-mojo -I . -D BPE_PT=$BPE_VAL "$BMDIR/bm.mojo" 2>&1 | tee "$MOJO_RESULT"
-
-# ── Python tiktoken ───────────────────────────────────────────────
-echo ""
-echo "───────────────────────────────────────────────────────────────"
-echo "  2/3  Python tiktoken"
-echo "───────────────────────────────────────────────────────────────"
-python "$BMDIR/benchmark_tiktoken.py" 2>&1 | tee "$PY_RESULT"
-
-# ── Rust tiktoken-rs ──────────────────────────────────────────────
-echo ""
-echo "───────────────────────────────────────────────────────────────"
-echo "  3/3  Rust tiktoken-rs"
-echo "───────────────────────────────────────────────────────────────"
-"$BMDIR/benchmark_rust/target/release/benchmark_rust" 2>&1 | tee "$RS_RESULT"
-
-# ═══════════════════════════════════════════════════════════════════
-# Extract and compare results
-# ═══════════════════════════════════════════════════════════════════
-echo ""
-echo ""
-echo "═══════════════════════════════════════════════════════════════"
-echo "  Results Summary"
-echo "═══════════════════════════════════════════════════════════════"
-
-# Extract "best:" lines — each file has encode then decode.
-# Format:   best: XX.X ms   Y.Y M tok/s
-# Extract encode/decode speeds from "best:" lines (first = encode, second = decode)
-mojo_best=$(awk '/best:/ {print $4, $5, $6}' "$MOJO_RESULT")
-py_best=$(awk '/best:/ {print $4, $5, $6}' "$PY_RESULT")
-rs_best=$(awk '/best:/ {print $4, $5, $6}' "$RS_RESULT")
-
-mojo_enc=$(echo "$mojo_best" | sed -n '1p')
-mojo_dec=$(echo "$mojo_best" | sed -n '2p')
-py_enc=$(echo "$py_best" | sed -n '1p')
-py_dec=$(echo "$py_best" | sed -n '2p')
-rs_enc=$(echo "$rs_best" | sed -n '1p')
-rs_dec=$(echo "$rs_best" | sed -n '2p')
-
-printf "\n%-22s %-16s %-16s\n" "" "encode (best)" "decode (best)"
-printf "%s\n" "──────────────────────────────────────────────────────"
-printf "%-22s %-16s %-16s\n" "Mojo"                "$mojo_enc" "$mojo_dec"
-printf "%-22s %-16s %-16s\n" "tiktoken (Python)"   "$py_enc" "$py_dec"
-printf "%-22s %-16s %-16s\n" "tiktoken-rs (Rust)"  "$rs_enc" "$rs_dec"
+echo "Done. Raw results in $RESULTS_DIR/"
 echo ""
