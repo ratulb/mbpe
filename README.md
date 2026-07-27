@@ -161,15 +161,15 @@ Module-level functions:
 
 | Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|---|
-| **gpt2** | Mojo native | 309K | **5.5** | **82.5** |
+| **gpt2** | **Mojo native** | 309K | **5.5** | **82.5** |
 | | mbpe (Python) | 309K | 3.8 | 49.3 |
 | | tiktoken (Python) | 309K | 2.5 | 29.4 |
 | | tiktoken-rs | 306K | 2.6 | 56.8 |
-| **cl100k** | Mojo native | 256K | **4.9** | **73.4** |
+| **cl100k** | **Mojo native** | 256K | **4.9** | **73.4** |
 | | mbpe (Python) | 256K | 3.5 | 45.0 |
 | | tiktoken (Python) | 256K | 2.1 | 30.7 |
 | | tiktoken-rs | 256K | 2.5 | 53.5 |
-| **o200k** | Mojo native | 256K | **4.4** | **72.5** |
+| **o200k** | **Mojo native** | 256K | **4.4** | **72.5** |
 | | mbpe (Python) | 256K | 3.1 | 42.6 |
 | | tiktoken (Python) | 256K | 3.8 | 25.5 |
 | | tiktoken-rs | 256K | 4.2 | 48.0 |
