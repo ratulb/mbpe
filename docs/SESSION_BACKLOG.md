@@ -6,7 +6,7 @@ Items to tackle in a future session, in rough priority order.
 
 1. **Training benchmark for mbpe_py** — Add train() timing to `benchmark_mbpe_quick.py` to measure FFI overhead during training (per-element corpus string conversion).
 
-2. **Python test suite** — `pytest` tests for all 4 tokenizer classes covering encode/decode/train/save/load roundtrips. Catches regressions on the Python side.
+2. **Cross-platform wheels** — Build macOS + Windows wheels via cibuildwheel or manual CI matrix (currently linux x86_64 only; others fall back to the broken `any` wheel).
 
 ## Medium Value
 
@@ -14,10 +14,13 @@ Items to tackle in a future session, in rough priority order.
 
 4. **Batch methods** — `encode_batch(texts)` / `decode_batch(ids_list)` — trivial loop wrappers, matches tiktoken API.
 
-5. **`allowed_special`/`disallowed_special` encode params** — Currently auto-scans all registered specials. tiktoken lets users control which special tokens are allowed inline.
-
 ## Nice to Have
 
-6. **Zero-copy corpus conversion in train()** — Apply `as_string_slice` + `PyList_GetItem` pattern to training loops (currently using `String(corpus_py[i])`).
+5. **Zero-copy corpus conversion in train()** — Apply `as_string_slice` + `PyList_GetItem` pattern to training loops (currently using `String(corpus_py[i])`).
 
-7. **CI pipeline** — `.github/workflows/test.yml` running Mojo tests + Python tests on push/PR.
+## Done
+
+- **`allowed_special`/`disallowed_special` encode params** — Implemented in `__init__.py` with full tiktoken-compatible logic.
+- **CI pipeline** — `python-tests.yml` (push/PR) + `publish.yml` (release/manual) both working.
+- **PyPI publishing** — `pyproject.toml`, `MANIFEST.in`, `scripts/publish.sh`, auditwheel repair with bundled Mojo runtime.
+- **Benchmarks: all 4 impls in one table** — Mojo native pre-built, mbpe Python, tiktoken Python, tiktoken-rs. 3 iterations, o200k supported everywhere. collate.py streamlined.
