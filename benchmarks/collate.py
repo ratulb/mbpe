@@ -170,24 +170,8 @@ def mb_per_s(n_bytes, time_ms):
 
 # ── Executive Summary ───────────────────────────────────────────
 
-def make_summary(mojo, mbpe_py, py_tiktoken, n_bytes):
+def make_summary(mbpe_py, py_tiktoken, n_bytes):
     lines = []
-
-    train_row = None
-    for r in mojo:
-        if r['variant'] == 'GPT2' and r['vocab_size'] == 4000:
-            train_row = r
-            break
-    if train_row is None and mojo:
-        train_row = mojo[-1]
-    train_s = None
-    if train_row:
-        t = get(train_row, 'train_ms')
-        if t != "—":
-            try:
-                train_s = float(t) / 1000
-            except (ValueError, TypeError):
-                pass
 
     mbpe_enc_best = None
     mbpe_dec_best = None
@@ -227,10 +211,6 @@ def make_summary(mojo, mbpe_py, py_tiktoken, n_bytes):
 
     bullets = []
 
-    if train_s is not None:
-        kb = n_bytes // 1024
-        bullets.append(f"🚀 Train a 4K-vocabulary tokenizer on {kb:,} KB in {train_s:.1f} s")
-
     if mbpe_enc_best:
         bullets.append(f"⚡ mbpe Python bindings encode at {mbpe_enc_best[0]:.1f} M tok/s ({mbpe_enc_best[1]})")
 
@@ -269,7 +249,9 @@ def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
     lines = []
     lines.append("### Encode/Decode Throughput — Fair Comparison")
     lines.append("")
-    lines.append("*Same corpus, real-world vocabularies (50K+ merges for tiktoken/mbpe; self-trained 4K merges for native Mojo).*")
+    mb = n_bytes / 1_048_576 if n_bytes > 0 else 0
+    corpus_size = f"{mb:.1f} MB" if mb >= 1 else f"{n_bytes // 1024} KB"
+    lines.append(f"*{corpus_size} corpus. tiktoken and mbpe Python bindings use pre-built vocabularies (50K+ merges). Native Mojo uses a self-trained vocabulary (4K merges) — not directly comparable.*")
     lines.append("")
 
     header = (
@@ -481,7 +463,7 @@ def main():
     # 2. Executive summary
     print("## Executive Summary")
     print()
-    print(make_summary(mojo, mbpe_py, py_tiktoken, n_bytes))
+    print(make_summary(mbpe_py, py_tiktoken, n_bytes))
     print()
 
     # 3. Combined comparison table
