@@ -225,7 +225,7 @@ def make_summary(mbpe_py, py_tiktoken, n_bytes):
         ratio = mbpe_dec_best[0] / py_dec_best[0]
         bullets.append(f"🏁 {ratio:.1f}× decode vs Python tiktoken")
 
-    bullets.append("📦 Compatible with .tiktoken vocabularies (gpt2 ~50K, cl100k ~100K, o200k ~200K)")
+    bullets.append("📦 Built-in support for .tiktoken vocabularies (gpt2 ~50K, cl100k ~100K, o200k ~200K)")
 
     lines.append("> **Highlights**")
     for b in bullets:
