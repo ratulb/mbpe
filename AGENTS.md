@@ -10,13 +10,14 @@ All via `pixi run` or inside `pixi shell`:
   - `main.mojo` = 36 tests (uses `TestSuite.discover_tests`)
   - `tests/test_tokenizer.mojo` = 9
   - `tests/exhaustive_tokenizer.mojo` = 33
-- **Benchmark (full suite)**: `bash benchmarks/run.sh` — 4 implementations (Mojo, Python tiktoken, mbpe Python bindings, Rust tiktoken-rs) × 6 corpora
-- **Quick benchmark** (1MB corpus, mbpe with 3 iters): `bash benchmarks/quick_bench.sh`
+- **Benchmark (full suite)**: `bash benchmarks/run.sh > results.md` — 4 implementations (Mojo, Python tiktoken, mbpe Python bindings, Rust tiktoken-rs) × 6 corpora. Stdout = clean markdown report, stderr = progress.
+- **Quick benchmark** (1MB corpus, mbpe with 3 iters): `bash benchmarks/quick_bench.sh > results.md`
   - `pixi run benchmark` / `benchmark-gpt2` / `benchmark-gpt4` are aliases (all run `run.sh`)
   - `BPE_CORPUS` overrides corpus path (default: `benchmarks/corpus.txt`)
   - Outputs JSON lines to `benchmarks/results/`
   - Individual benchmarks: `benchmarks/bm.mojo` (Mojo), `benchmarks/benchmark_tiktoken.py` (tiktoken), `benchmarks/benchmark_mbpe.py` / `benchmark_mbpe_quick.py` (mbpe), `benchmarks/benchmark_rust/` (tiktoken-rs)
-  - Collation: `python benchmarks/collate.py <mojo.json> <tiktoken.json> <tiktoken-rs.json> <mbpe.json>`
+  - Collation: `python benchmarks/collate.py [--no-hardware] <mojo.json> <tiktoken.json> <tiktoken-rs.json> <mbpe.json>` — full markdown report (exec summary + combined table + native pipeline + scaling)
+  - Hardware info embedded in collate.py (use `--no-hardware` for multi-corpus runs; standalone via `benchmarks/hardware_info.py`)
 - **Benchmark setup**: `bash benchmarks/setup_bench_env.sh` — installs Rust (rustup) + Python venv at `/tmp/mbpe-bench-venv/` with tiktoken. Sourced by `run.sh` and `quick_bench.sh` automatically.
 - **Direct benchmark**: `mojo -I . benchmarks/bm.mojo` (single corpus via `BPE_CORPUS`)
 - **Full reference**: `benchmarks/BENCHMARKS.md` — methodology, output schemas, file-by-file docs

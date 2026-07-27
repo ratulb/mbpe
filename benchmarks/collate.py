@@ -1,21 +1,112 @@
 #!/usr/bin/env python3
-"""Collate benchmark JSON results into comparison tables.
+"""Collate benchmark JSON results into a structured markdown report.
 
 Reads Mojo JSON (one line per (variant, vocab_size) combo),
 Python tiktoken JSON (one line per encoding),
 Rust tiktoken-rs JSON (one line per encoding), and
 mbpe Python bindings JSON (one line per encoding) from files,
-then prints markdown comparison tables.
+then prints a markdown report with executive summary + comparison tables.
 
 Usage:  python benchmarks/collate.py <mojo.json> <tiktoken.json> <tiktoken-rs.json> <mbpe.json>
 """
 
+import datetime
 import json
+import platform
+import subprocess
 import sys
 
 
+# ── Hardware detection ──────────────────────────────────────────
+
+def _run(cmd):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() if r.returncode == 0 else "N/A"
+    except Exception:
+        return "N/A"
+
+
+def _cpu_model():
+    out = _run(["lscpu"])
+    for line in out.split("\n"):
+        if "Model name" in line:
+            return line.split(":", 1)[-1].strip()
+    out = _run(["cat", "/proc/cpuinfo"])
+    for line in out.split("\n"):
+        if line.startswith("model name"):
+            return line.split(":", 1)[-1].strip()
+    return platform.processor() or "N/A"
+
+
+def _cpu_cores():
+    out = _run(["nproc"])
+    try:
+        return int(out.strip())
+    except (ValueError, TypeError):
+        return "N/A"
+
+
+def _ram():
+    out = _run(["free", "-h"])
+    for line in out.split("\n"):
+        if line.startswith("Mem:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                return parts[1]
+    return "N/A"
+
+
+def _os():
+    out = _run(["cat", "/etc/os-release"])
+    for line in out.split("\n"):
+        if line.startswith("PRETTY_NAME="):
+            return line.split("=", 1)[-1].strip().strip('"')
+    return platform.system() + " " + platform.release()
+
+
+def _mojo_version():
+    return _run(["mojo", "--version"])
+
+
+def _python_version():
+    return _run(["pixi", "run", "python", "--version"]) or sys.version.split()[0]
+
+
+def _rust_version():
+    return _run(["rustc", "--version"])
+
+
+def _tiktoken_version():
+    try:
+        import tiktoken
+        return tiktoken.__version__
+    except ImportError:
+        return "N/A"
+
+
+def make_hardware_table():
+    lines = []
+    lines.append("### Benchmark Environment")
+    lines.append("")
+    lines.append("| Property | Value |")
+    lines.append("|----------|-------|")
+    lines.append(f"| Date | {datetime.date.today()} |")
+    lines.append(f"| CPU | {_cpu_model()} |")
+    lines.append(f"| Cores | {_cpu_cores()} (logical) |")
+    lines.append(f"| RAM | {_ram()} |")
+    lines.append(f"| OS | {_os()} |")
+    lines.append(f"| Mojo | {_mojo_version()} |")
+    lines.append(f"| Python (pixi) | {_python_version()} |")
+    lines.append(f"| Rust | {_rust_version()} |")
+    lines.append(f"| tiktoken | {_tiktoken_version()} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ── JSON loading ────────────────────────────────────────────────
+
 def load_json_lines(path):
-    """Load a JSON-lines file into a list of dicts. Returns [] on error/missing."""
     results = []
     try:
         with open(path) as f:
@@ -27,158 +118,352 @@ def load_json_lines(path):
                         if isinstance(d, dict) and "impl" in d:
                             results.append(d)
                     except json.JSONDecodeError:
-                        pass  # skip malformed lines
+                        pass
     except (FileNotFoundError, IOError):
         pass
     return results
 
 
-def val(d, key, default="—"):
-    """Safely extract a numeric value, formatting if needed."""
+def get(d, key, default="—"):
     v = d.get(key, default)
     if v is None or v == "N/A" or v == -1:
         return "—"
     return v
 
 
-def fmt_ms(val):
-    if val == "—":
-        return val
+def fmt_ms(v):
+    if v == "—":
+        return v
     try:
-        return f"{float(val):.1f}"
+        return f"{float(v):.1f}"
     except (ValueError, TypeError):
-        return str(val)
+        return str(v)
 
 
-def fmt_mtok(val):
-    if val == "—":
-        return val
+def fmt_mtok(v):
+    if v == "—":
+        return v
     try:
-        return f"{float(val):.1f}"
+        return f"{float(v):.1f}"
     except (ValueError, TypeError):
-        return str(val)
+        return str(v)
 
 
-def fmt_merges(val):
-    if val == "—":
-        return val
+def fmt_mbs(v):
+    if v == "—":
+        return v
     try:
-        return f"{float(val):.0f}"
+        return f"{float(v):.1f}"
     except (ValueError, TypeError):
-        return str(val)
+        return str(v)
 
+
+def mb_per_s(n_bytes, time_ms):
+    if time_ms == "—" or not time_ms:
+        return "—"
+    try:
+        t = float(time_ms)
+        return n_bytes * 1000 / (t * 1_048_576)
+    except (ValueError, ZeroDivisionError, TypeError):
+        return "—"
+
+
+# ── Executive Summary ───────────────────────────────────────────
+
+def make_summary(mojo, mbpe_py, py_tiktoken, n_bytes):
+    lines = []
+
+    train_row = None
+    for r in mojo:
+        if r['variant'] == 'GPT2' and r['vocab_size'] == 4000:
+            train_row = r
+            break
+    if train_row is None and mojo:
+        train_row = mojo[-1]
+    train_s = None
+    if train_row:
+        t = get(train_row, 'train_ms')
+        if t != "—":
+            try:
+                train_s = float(t) / 1000
+            except (ValueError, TypeError):
+                pass
+
+    mbpe_enc_best = None
+    mbpe_dec_best = None
+    for r in mbpe_py:
+        enc = get(r, 'encode_mtok_s')
+        dec = get(r, 'decode_mtok_s')
+        if enc != "—":
+            try:
+                if mbpe_enc_best is None or float(enc) > mbpe_enc_best[0]:
+                    mbpe_enc_best = (float(enc), r['encoding'])
+            except (ValueError, TypeError):
+                pass
+        if dec != "—":
+            try:
+                if mbpe_dec_best is None or float(dec) > mbpe_dec_best[0]:
+                    mbpe_dec_best = (float(dec), r['encoding'])
+            except (ValueError, TypeError):
+                pass
+
+    py_enc_best = None
+    py_dec_best = None
+    for r in py_tiktoken:
+        enc = get(r, 'encode_mtok_s')
+        dec = get(r, 'decode_mtok_s')
+        if enc != "—":
+            try:
+                if py_enc_best is None or float(enc) > py_enc_best[0]:
+                    py_enc_best = (float(enc), r['encoding'])
+            except (ValueError, TypeError):
+                pass
+        if dec != "—":
+            try:
+                if py_dec_best is None or float(dec) > py_dec_best[0]:
+                    py_dec_best = (float(dec), r['encoding'])
+            except (ValueError, TypeError):
+                pass
+
+    bullets = []
+
+    if train_s is not None:
+        kb = n_bytes // 1024
+        bullets.append(f"🚀 Train a 4K-vocabulary tokenizer on {kb:,} KB in {train_s:.1f} s")
+
+    if mbpe_enc_best:
+        bullets.append(f"⚡ mbpe Python bindings encode at {mbpe_enc_best[0]:.1f} M tok/s ({mbpe_enc_best[1]})")
+
+    if mbpe_dec_best:
+        bullets.append(f"⚡ mbpe Python bindings decode at {mbpe_dec_best[0]:.1f} M tok/s ({mbpe_dec_best[1]})")
+
+    if mbpe_enc_best and py_enc_best:
+        ratio = mbpe_enc_best[0] / py_enc_best[0]
+        bullets.append(f"🏁 {ratio:.1f}× encode vs Python tiktoken")
+
+    if mbpe_dec_best and py_dec_best:
+        ratio = mbpe_dec_best[0] / py_dec_best[0]
+        bullets.append(f"🏁 {ratio:.1f}× decode vs Python tiktoken")
+
+    bullets.append("📦 Compatible with .tiktoken vocabularies (gpt2 ~50K, cl100k ~100K, o200k ~200K)")
+
+    lines.append("> **Highlights**")
+    for b in bullets:
+        lines.append(f">")
+        lines.append(f"> {b}")
+    lines.append(">")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ── Combined Comparison Table ───────────────────────────────────
+
+VARIANT_LABELS = {
+    "GPre": "GPreTokenizer (Ġ)",
+    "GPT2": "GPT2Pretokenizer (r50k_base)",
+    "GPT4": "GPT4Pretokenizer (cl100k_base)",
+}
+
+
+def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
+    lines = []
+    lines.append("### Encode/Decode Throughput — Fair Comparison")
+    lines.append("")
+    lines.append("*Same corpus, real-world vocabularies (50K+ merges for tiktoken/mbpe; self-trained 4K merges for native Mojo).*")
+    lines.append("")
+
+    header = (
+        "| Encoding | Implementation | Tokens | Encode (ms) | "
+        "Encode (M tok/s) | Encode (MB/s) | Decode (ms) | "
+        "Decode (M tok/s) | Decode (MB/s) |"
+    )
+    sep = "|" + "|".join(["---"] * 9) + "|"
+    lines.append(header)
+    lines.append(sep)
+
+    mbpe_by_enc = {r['encoding']: r for r in mbpe_py}
+    py_by_enc = {r['encoding']: r for r in py_tiktoken}
+    rs_by_enc = {r['encoding']: r for r in rs_tiktoken}
+
+    encodings = ["gpt2", "cl100k", "o200k"]
+
+    for enc in encodings:
+        impls = []
+        if enc in mbpe_by_enc:
+            impls.append(("mbpe (Python)", mbpe_by_enc[enc]))
+        if enc in py_by_enc:
+            impls.append(("tiktoken (Python)", py_by_enc[enc]))
+        if enc in rs_by_enc:
+            impls.append(("tiktoken-rs", rs_by_enc[enc]))
+        if not impls:
+            continue
+
+        for label, r in impls:
+            tok = get(r, 'n_tokens')
+            e_ms = get(r, 'encode_ms')
+            e_mtok = get(r, 'encode_mtok_s')
+            e_mbs = mb_per_s(n_bytes, e_ms)
+            d_ms = get(r, 'decode_ms')
+            d_mtok = get(r, 'decode_mtok_s')
+            d_mbs = mb_per_s(n_bytes, d_ms)
+            display = f"**{label}**" if label.startswith("mbpe") else label
+            lines.append(
+                f"| {enc} "
+                f"| {display} "
+                f"| {tok} "
+                f"| {fmt_ms(e_ms)} "
+                f"| {fmt_mtok(e_mtok)} "
+                f"| {fmt_mbs(e_mbs)} "
+                f"| {fmt_ms(d_ms)} "
+                f"| {fmt_mtok(d_mtok)} "
+                f"| {fmt_mbs(d_mbs)} |"
+            )
+
+    # Native Mojo — pick GPT2 vocab=4000 as representative
+    native_row = None
+    for r in mojo:
+        if r['variant'] == 'GPT2' and r['vocab_size'] == 4000:
+            native_row = r
+            break
+    if native_row is None and mojo:
+        native_row = mojo[-1]
+
+    if native_row:
+        var_label = VARIANT_LABELS.get(native_row['variant'], native_row['variant'])
+        lines.append(
+            f"| self-trained "
+            f"| Mojo native — {var_label} "
+            f"| {native_row['n_tokens']} "
+            f"| {fmt_ms(get(native_row, 'encode_ms'))} "
+            f"| {fmt_mtok(get(native_row, 'encode_mtok_s'))} "
+            f"| {fmt_mbs(mb_per_s(n_bytes, get(native_row, 'encode_ms')))} "
+            f"| {fmt_ms(get(native_row, 'decode_ms'))} "
+            f"| {fmt_mtok(get(native_row, 'decode_mtok_s'))} "
+            f"| {fmt_mbs(mb_per_s(n_bytes, get(native_row, 'decode_ms')))} |"
+        )
+
+    lines.append("")
+    notes = []
+
+    gpt2_tokens = {}
+    for label, lookup in [("mbpe (Python)", mbpe_by_enc), ("tiktoken (Python)", py_by_enc), ("tiktoken-rs", rs_by_enc)]:
+        if "gpt2" in lookup:
+            gpt2_tokens[label] = lookup["gpt2"].get('n_tokens')
+    token_vals = {v for v in gpt2_tokens.values() if v and v != "—"}
+    if len(token_vals) > 1:
+        notes.append(
+            "tiktoken-rs gpt2 token count differs from Python — likely a "
+            "pre-tokenizer regex version mismatch between the tiktoken-rs crate "
+            "and OpenAI/tiktoken."
+        )
+
+    if native_row:
+        notes.append(
+            "Native Mojo uses a self-trained vocabulary ("
+            f"{native_row['vocab_size']} merges) — not directly comparable to "
+            "the 50K+ merge vocabularies above. See the scaling table below."
+        )
+
+    for i, note in enumerate(notes):
+        lines.append(f"_{i+1}. {note}_")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ── Native Mojo Pipeline ─────────────────────────────────────────
 
 def make_mojo_table(mojo_rows):
-    """Create a comparison table from Mojo results."""
     lines = []
-    lines.append("### Mojo Pipeline (training + encode + decode)")
+    lines.append("### Mojo Native Pipeline — Training + Encode + Decode")
     lines.append("")
     lines.append("| Variant | Vocab | Merges | Train (ms) | Merges/s | Encode (ms) | Encode (M tok/s) | Decode (ms) | Decode (M tok/s) |")
     lines.append("|---------|-------|--------|-----------|----------|-------------|-----------------|-------------|-----------------|")
     for r in mojo_rows:
+        var_label = VARIANT_LABELS.get(r['variant'], r['variant'])
+        tr = get(r, 'train_merges_s', 0)
+        merges_s = f"{float(tr):.0f}" if tr != "—" else "—"
         lines.append(
-            f"| {r['variant']} "
+            f"| {var_label} "
             f"| {r['vocab_size']} "
             f"| {r['n_merges']} "
-            f"| {fmt_ms(r['train_ms'])} "
-            f"| {fmt_merges(r['train_merges_s'])} "
-            f"| {fmt_ms(r['encode_ms'])} "
-            f"| {fmt_mtok(r['encode_mtok_s'])} "
-            f"| {fmt_ms(r['decode_ms'])} "
-            f"| {fmt_mtok(r['decode_mtok_s'])} |"
+            f"| {fmt_ms(get(r, 'train_ms'))} "
+            f"| {merges_s} "
+            f"| {fmt_ms(get(r, 'encode_ms'))} "
+            f"| {fmt_mtok(get(r, 'encode_mtok_s'))} "
+            f"| {fmt_ms(get(r, 'decode_ms'))} "
+            f"| {fmt_mtok(get(r, 'decode_mtok_s'))} |"
         )
     return "\n".join(lines)
 
 
-def make_tiktoken_table(tiktoken_rows, title, impl_name):
-    """Create a comparison table for tiktoken results (Python or Rust)."""
+# ── Scaling Tables ───────────────────────────────────────────────
+
+def make_scaling_tables(mojo_rows):
     lines = []
-    lines.append(f"### {title}")
+    lines.append("### Mojo Throughput Scaling by Vocab Size")
     lines.append("")
-    lines.append("| Encoding | Tokens | Encode (ms) | Encode (M tok/s) | Decode (ms) | Decode (M tok/s) |")
-    lines.append("|----------|--------|-------------|-----------------|-------------|-----------------|")
-    for r in tiktoken_rows:
-        lines.append(
-            f"| {r['encoding']} "
-            f"| {r['n_tokens']} "
-            f"| {fmt_ms(r['encode_ms'])} "
-            f"| {fmt_mtok(r['encode_mtok_s'])} "
-            f"| {fmt_ms(r['decode_ms'])} "
-            f"| {fmt_mtok(r['decode_mtok_s'])} |"
-        )
+    lines.append("*Encode speed and training time both decrease as vocabulary grows "
+                 "(longer merge chains). These numbers use self-trained vocabularies "
+                 "and are not directly comparable to 50K+ tokenizers above.*")
+    lines.append("")
+
+    lines.append("**Encode throughput (M tok/s)**")
+    lines.append("")
+    lines.append("| Variant | Vocab=500 | Vocab=1000 | Vocab=2000 | Vocab=4000 |")
+    lines.append("|---------|-----------|------------|------------|------------|")
+    for variant in ["GPre", "GPT2", "GPT4"]:
+        var_label = VARIANT_LABELS.get(variant, variant)
+        row = []
+        for vs in [500, 1000, 2000, 4000]:
+            matches = [r for r in mojo_rows if r['variant'] == variant and r['vocab_size'] == vs]
+            if matches:
+                row.append(f"{fmt_mtok(get(matches[0], 'encode_mtok_s'))}")
+        if row:
+            lines.append(f"| {var_label} | {' | '.join(row)} |")
+    lines.append("")
+
+    lines.append("**Training time (ms)**")
+    lines.append("")
+    lines.append("| Variant | Vocab=500 | Vocab=1000 | Vocab=2000 | Vocab=4000 |")
+    lines.append("|---------|-----------|------------|------------|------------|")
+    for variant in ["GPre", "GPT2", "GPT4"]:
+        var_label = VARIANT_LABELS.get(variant, variant)
+        row = []
+        for vs in [500, 1000, 2000, 4000]:
+            matches = [r for r in mojo_rows if r['variant'] == variant and r['vocab_size'] == vs]
+            if matches:
+                row.append(f"{fmt_ms(get(matches[0], 'train_ms'))}")
+        if row:
+            lines.append(f"| {var_label} | {' | '.join(row)} |")
+
     return "\n".join(lines)
 
 
-def make_encode_comparison(mojo_rows, tiktoken_rows, impl_a, impl_b):
-    """Side-by-side encode comparison: Mojo (all variants) vs tiktoken."""
-    lines = []
-    lines.append(f"### Encode Comparison: Mojo vs {impl_a} vs {impl_b}")
-    lines.append("")
-    lines.append("| Variant | Mojo (M tok/s) | " + impl_a + " (M tok/s) | " + impl_b + " (M tok/s) |")
-    lines.append("|---------|----------------|----------------------|----------------------|")
-
-    # Group by encoding family
-    # Mojo GPT2 → compare with tiktoken gpt2, Mojo GPT4 → compare with tiktoken cl100k
-    # Use the first entry per variant (vocab_size=500)
-    mojo_by_var = {}
-    for r in mojo_rows:
-        vs = r['vocab_size']
-        if vs == 500:
-            mojo_by_var[r['variant']] = r
-
-    tiktoken_a = {r['encoding']: r for r in tiktoken_rows[0]} if tiktoken_rows else {}
-    tiktoken_b = {r['encoding']: r for r in tiktoken_rows[1]} if len(tiktoken_rows) > 1 else {}
-
-    if not tiktoken_a:
-        tiktoken_a = {r['encoding']: r for r in tiktoken_rows}
-
-    comparisons = [
-        ("GPT2", "gpt2", "gpt2"),
-        ("GPT4", "cl100k", "cl100k"),
-    ]
-
-    for mojo_variant, enc_a_name, enc_b_name in comparisons:
-        m = mojo_by_var.get(mojo_variant, {})
-        a = {}
-        b = {}
-        if isinstance(tiktoken_rows, list) and len(tiktoken_rows) > 0:
-            # Find the correct encoding
-            for r in tiktoken_rows[0]:
-                if r['encoding'] == enc_a_name:
-                    a = r
-                    break
-        if isinstance(tiktoken_rows, list) and len(tiktoken_rows) > 1:
-            for r in tiktoken_rows[1]:
-                if r['encoding'] == enc_b_name:
-                    b = r
-                    break
-
-        lines.append(
-            f"| {mojo_variant} "
-            f"| {fmt_mtok(val(m, 'encode_mtok_s'))} "
-            f"| {fmt_mtok(val(a, 'encode_mtok_s'))} "
-            f"| {fmt_mtok(val(b, 'encode_mtok_s'))} |"
-        )
-    return "\n".join(lines)
-
+# ── Main ─────────────────────────────────────────────────────────
 
 def main():
-    if len(sys.argv) < 5:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = set(a for a in sys.argv[1:] if a.startswith("--"))
+
+    if len(args) < 4:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
 
-    mojo_path = sys.argv[1]
-    py_path = sys.argv[2]
-    rs_path = sys.argv[3]
-    mbpe_path = sys.argv[4]
+    mojo = load_json_lines(args[0])
+    py_tiktoken = load_json_lines(args[1])
+    rs_tiktoken = load_json_lines(args[2])
+    mbpe_py = load_json_lines(args[3])
+    show_hardware = "--no-hardware" not in flags
 
-    mojo = load_json_lines(mojo_path)
-    py_tiktoken = load_json_lines(py_path)
-    rs_tiktoken = load_json_lines(rs_path)
-    mbpe_py = load_json_lines(mbpe_path)
+    # Corpus size from first available row
+    n_bytes = 0
+    for r in mojo + py_tiktoken + rs_tiktoken + mbpe_py:
+        b = r.get('corpus_bytes', 0)
+        if b:
+            n_bytes = b
+            break
 
-    # Corpus size
-    n_bytes = mojo[0]['corpus_bytes'] if mojo else 0
     mb = n_bytes / 1_048_576 if n_bytes > 0 else 0
     if mb >= 1:
         corpus_label = f"{mb:.1f} MB"
@@ -188,113 +473,30 @@ def main():
     print(f"# Benchmark Results — {corpus_label} corpus")
     print()
 
-    # Mojo table
-    print(make_mojo_table(mojo))
+    # 1. Hardware (skippable for multi-corpus runs)
+    if show_hardware:
+        print(make_hardware_table())
+        print()
+
+    # 2. Executive summary
+    print("## Executive Summary")
+    print()
+    print(make_summary(mojo, mbpe_py, py_tiktoken, n_bytes))
     print()
 
-    # Python tiktoken table
-    if py_tiktoken:
-        print(make_tiktoken_table(py_tiktoken, "Python tiktoken", "tiktoken_py"))
-        print()
-
-    # mbpe Python bindings table
-    if mbpe_py:
-        print(make_tiktoken_table(mbpe_py, "mbpe Python bindings", "mbpe_py"))
-        print()
-
-    # Rust tiktoken-rs table
-    if rs_tiktoken:
-        print(make_tiktoken_table(rs_tiktoken, "Rust tiktoken-rs", "tiktoken_rs"))
-        print()
-
-    # Cross-comparison: encode/decode (available benchmarks)
-    py_encs = {r['encoding']: r for r in py_tiktoken}
-    mbpe_encs = {r['encoding']: r for r in mbpe_py}
-    rs_encs = {r['encoding']: r for r in rs_tiktoken}
-
-    if py_encs or mbpe_encs or rs_encs:
-        print("### Encode/Decode Cross-Comparison (vocab_size=500 for Mojo)")
-        print()
-        cols = ["Encoding", "Mojo enc", "Mojo dec"]
-        if py_encs:
-            cols += ["tiktoken_py enc", "tiktoken_py dec"]
-        if mbpe_encs:
-            cols += ["mbpe_py enc", "mbpe_py dec"]
-        if rs_encs:
-            cols += ["tiktoken_rs enc", "tiktoken_rs dec"]
-        header = "| " + " | ".join(cols) + " |"
-        sep = "| " + " | ".join(["-" * max(len(c), 3) for c in cols]) + " |"
-        print(header)
-        print(sep)
-
-        # Get Mojo GPT2 and GPT4 at vocab_size=500
-        mojo_map = {}
-        for r in mojo:
-            if r['vocab_size'] == 500:
-                mojo_map[r['variant']] = r
-
-        for mojo_var, enc_name in [("GPT2", "gpt2"), ("GPT4", "cl100k")]:
-            m = mojo_map.get(mojo_var, {})
-            m_enc = fmt_mtok(val(m, 'encode_mtok_s'))
-            m_dec = fmt_mtok(val(m, 'decode_mtok_s'))
-            row = [enc_name, m_enc, m_dec]
-            if py_encs:
-                p = py_encs.get(enc_name, {})
-                row += [fmt_mtok(val(p, 'encode_mtok_s')), fmt_mtok(val(p, 'decode_mtok_s'))]
-            if mbpe_encs:
-                mb = mbpe_encs.get(enc_name, {})
-                row += [fmt_mtok(val(mb, 'encode_mtok_s')), fmt_mtok(val(mb, 'decode_mtok_s'))]
-            if rs_encs:
-                r = rs_encs.get(enc_name, {})
-                row += [fmt_mtok(val(r, 'encode_mtok_s')), fmt_mtok(val(r, 'decode_mtok_s'))]
-            print("| " + " | ".join(row) + " |")
-        print()
-
-    # mbpe_py vs tiktoken_py comparison (same API, same encodings)
-    if mbpe_py and py_tiktoken:
-        print("### mbpe Python Bindings vs Python tiktoken (encode/decode)")
-        print()
-        print("| Encoding | mbpe_py enc (M tok/s) | tiktoken_py enc (M tok/s) | mbpe_py dec (M tok/s) | tiktoken_py dec (M tok/s) |")
-        print("|----------|------------------------|---------------------------|------------------------|---------------------------|")
-        for enc_name in ["gpt2", "cl100k", "o200k"]:
-            mb = {r['encoding']: r for r in mbpe_py}.get(enc_name, {})
-            pt = {r['encoding']: r for r in py_tiktoken}.get(enc_name, {})
-            print(
-                f"| {enc_name} "
-                f"| {fmt_mtok(val(mb, 'encode_mtok_s'))} "
-                f"| {fmt_mtok(val(pt, 'encode_mtok_s')) if enc_name in py_encs else '—'} "
-                f"| {fmt_mtok(val(mb, 'decode_mtok_s'))} "
-                f"| {fmt_mtok(val(pt, 'decode_mtok_s')) if enc_name in py_encs else '—'} |"
-            )
-        print()
-
-    # Scaling table: per-variant, per-vocab-size
-    print("### Scaling: Encode throughput by Vocab Size")
+    # 3. Combined comparison table
+    print(make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes))
     print()
-    print("| Variant | Vocab=500 | Vocab=1000 | Vocab=2000 | Vocab=4000 |")
-    print("|---------|-----------|------------|------------|------------|")
-    for variant in ["GPre", "GPT2", "GPT4"]:
-        row = []
-        for vs in [500, 1000, 2000, 4000]:
-            matches = [r for r in mojo if r['variant'] == variant and r['vocab_size'] == vs]
-            if matches:
-                row.append(f"{fmt_mtok(val(matches[0], 'encode_mtok_s'))}")
-        if row:
-            print(f"| {variant} | {' | '.join(row)} |")
 
-    print()
-    print("### Scaling: Training time by Vocab Size")
-    print()
-    print("| Variant | Vocab=500 | Vocab=1000 | Vocab=2000 | Vocab=4000 |")
-    print("|---------|-----------|------------|------------|------------|")
-    for variant in ["GPre", "GPT2", "GPT4"]:
-        row = []
-        for vs in [500, 1000, 2000, 4000]:
-            matches = [r for r in mojo if r['variant'] == variant and r['vocab_size'] == vs]
-            if matches:
-                row.append(f"{fmt_ms(val(matches[0], 'train_ms'))}")
-        if row:
-            print(f"| {variant} | {' | '.join(row)} |")
+    # 4. Native Mojo pipeline (only if we have Mojo data)
+    if mojo:
+        print(make_mojo_table(mojo))
+        print()
+
+    # 5. Scaling
+    if mojo:
+        print(make_scaling_tables(mojo))
+        print()
 
 
 if __name__ == "__main__":

@@ -90,6 +90,18 @@ Every benchmark script writes **JSON lines** to stdout, one object per (implemen
 }
 ```
 
+## Markdown report
+
+Both `run.sh` and `quick_bench.sh` produce a complete markdown report on stdout. The report structure:
+
+1. **Hardware environment** — CPU, cores, RAM, OS, tool versions
+2. **Executive summary** — headline numbers: train time, encode/decode throughput, speedup ratios
+3. **Combined comparison table** — all 4 implementations in one table, grouped by encoding, with MB/s alongside M tok/s for fair cross-encoding comparison
+4. **Native Mojo pipeline** — full training + encode + decode table (all variants, all vocab sizes)
+5. **Mojo throughput scaling** — how encode speed and training time scale with vocab size
+
+Capturing: `bash benchmarks/quick_bench.sh > report.md`. Progress messages go to stderr and don't pollute the output.
+
 ## Results storage
 
 Raw output files live in `benchmarks/results/`:
@@ -104,11 +116,12 @@ results/
 
 Where `{LABEL}` is one of `10KB`, `100KB`, `500KB`, `1MB`, `2MB`, `5MB`.
 
-Two scripts collate these into human-readable tables:
+These are assembled into the final report by `collate.py`:
 
 | Script | What it does |
 |--------|-------------|
-| `collate.py` | Reads 4 JSON files (one per impl) for a single corpus size → markdown tables |
+| `collate.py` | Full report for one corpus: `collate.py [--no-hardware] <mojo.json> <py.json> <rs.json> <mbpe.json>` — executive summary + combined comparison table + native pipeline + scaling. `--no-hardware` skips hardware table for multi-corpus runs. |
+| `hardware_info.py` | Standalone hardware info: `hardware_info.py` → hardware markdown table |
 | `build_summary.py` | Reads all result files across all corpus sizes → cross-size comparison tables |
 
 ## Pre-requisites
@@ -154,16 +167,18 @@ Trains all 4 variants on inline corpus (~10 KB), measures encode/decode. No Rust
 ### Quick benchmark (~30 seconds, 1 MB corpus, all 4 implementations)
 
 ```bash
-bash benchmarks/quick_bench.sh
+bash benchmarks/quick_bench.sh > results.md
 ```
 
-Runs all 4 implementations on the 1 MB corpus, collates results as markdown tables.
+Runs all 4 implementations on the 1 MB corpus, outputs a complete markdown report (hardware info + results tables) to stdout. Stderr shows progress. Redirect to a file for a ready-to-paste report.
 
 ### Full benchmark suite (minutes, 6 corpus sizes, all implementations)
 
 ```bash
-bash benchmarks/run.sh
+bash benchmarks/run.sh > results.md
 ```
+
+Runs all 4 implementations on 6 corpus sizes (10 KB through 5 MB), with 4 vocab sizes each. Outputs hardware info + per-corpus results tables as markdown to stdout.
 
 See environment variables below to skip specific implementations.
 
@@ -209,8 +224,8 @@ python benchmarks/build_summary.py
 
 | File | Role |
 |------|------|
-| `run.sh` | Full suite: all 4 impls × 6 corpus sizes × 4 vocab sizes. Sources `setup_bench_env.sh`, builds `_mbpe.so`, generates corpora, runs all benchmarks, collates. |
-| `quick_bench.sh` | Same as `run.sh` but only 1 MB corpus, 3 mbpe iterations. |
+| `run.sh` | Full suite: all 4 impls × 6 corpus sizes × 4 vocab sizes. Sources `setup_bench_env.sh`, builds `_mbpe.so`, generates corpora, runs all benchmarks, emits markdown report to stdout (progress to stderr). |
+| `quick_bench.sh` | Same as `run.sh` but only 1 MB corpus, 3 mbpe iterations. Emits markdown report to stdout. |
 | `setup_bench_env.sh` | Installs Rust + Python venv with tiktoken. Sourced by orchestrators. Exports `$VENV_PYTHON`. |
 
 ### Mojo benchmarks
@@ -243,7 +258,8 @@ python benchmarks/build_summary.py
 
 | File | Role |
 |------|------|
-| `collate.py` | `python collate.py <mojo.json> <py.json> <rs.json> <mbpe.json>` → markdown tables |
+| `hardware_info.py` | Collects CPU model, cores, RAM, OS, tool versions → hardware markdown table |
+| `collate.py` | Full report: `collate.py [--no-hardware] <mojo.json> <py.json> <rs.json> <mbpe.json>` — executive summary + combined comparison table (all 4 impls, MB/s + M tok/s) + native pipeline + scaling |
 | `build_summary.py` | Reads all `results/*.json` → cross-size summary markdown table |
 | `generate_corpora.py` | Generates `corpus_{10KB,100KB,500KB,1MB,2MB,5MB}.txt` from `corpus.txt` |
 

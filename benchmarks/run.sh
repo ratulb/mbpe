@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Runner for simple_bpe benchmarks.
-# Orchestrates Mojo, Python tiktoken, and Rust tiktoken-rs across
-# multiple corpus sizes and vocab sizes.
+# Full benchmark suite — 4 implementations × 6 corpus sizes × 4 vocab sizes.
 #
 # Usage:  bash benchmarks/run.sh
 #   BPE_NO_RUST=1  skip Rust benchmark
 #   BPE_SKIP_PY=1  skip Python benchmark
+#
+# Output: final stdout is a complete markdown report (hardware + results).
+#   bash benchmarks/run.sh > results.md  to capture.
+# Progress/debug messages go to stderr.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,31 +24,30 @@ CORPORA=(
 )
 RESULTS_DIR="$BMDIR/results"
 
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  simple_bpe  —  Multi-Language Benchmark Suite              ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════════════════════╗" >&2
+echo "║  simple_bpe  —  Multi-Language Benchmark Suite              ║" >&2
+echo "╚══════════════════════════════════════════════════════════════╝" >&2
 
-# ── Setup dependencies ──────────────────────────────────────────
-source "$BMDIR/setup_bench_env.sh"
+# ── Setup dependencies (stdout → stderr) ────────────────────────
+source "$BMDIR/setup_bench_env.sh" >&2
 
-echo ""
-echo "── Mojo ──"
+echo "" >&2
+echo "── Mojo ──" >&2
 if command -v mojo &>/dev/null; then
-    echo "  Mojo: $(mojo --version 2>&1 | head -1 | cut -d' ' -f3)"
+    echo "  Mojo: $(mojo --version 2>&1 | head -1 | cut -d' ' -f3)" >&2
 else
-    echo "  ERROR: Mojo not found. Activate pixi shell first."
+    echo "  ERROR: Mojo not found. Activate pixi shell first." >&2
     exit 1
 fi
 
-# Build mbpe Python bindings (shared library)
-echo "  Building _mbpe.so..."
-pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so 2>&1 | tail -1
-echo "  _mbpe.so built"
+echo "  Building _mbpe.so..." >&2
+pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so 2>&1 | tail -1 >&2
+echo "  _mbpe.so built" >&2
 
-# ── Generate corpora ─────────────────────────────────────────────
-echo ""
-echo "── Corpora ──"
-"$VENV_PYTHON" "$BMDIR/generate_corpora.py" 2>&1
+# ── Generate corpora (stdout → stderr) ──────────────────────────
+echo "" >&2
+echo "── Corpora ──" >&2
+"$VENV_PYTHON" "$BMDIR/generate_corpora.py" >&2
 
 # ── Run benchmarks ───────────────────────────────────────────────
 mkdir -p "$RESULTS_DIR"
@@ -56,10 +57,10 @@ for corpus_spec in "${CORPORA[@]}"; do
     CORPUS_LABEL="${corpus_spec##*:}"
     CORPUS_PATH="$BMDIR/$CORPUS_FILE"
 
-    echo ""
-    echo "═══════════════════════════════════════════════════════════"
-    echo "  Corpus: $CORPUS_LABEL ($(wc -c < "$CORPUS_PATH") bytes)"
-    echo "═══════════════════════════════════════════════════════════"
+    echo "" >&2
+    echo "═══════════════════════════════════════════════════════════" >&2
+    echo "  Corpus: $CORPUS_LABEL ($(wc -c < "$CORPUS_PATH") bytes)" >&2
+    echo "═══════════════════════════════════════════════════════════" >&2
 
     export BPE_CORPUS="$CORPUS_PATH"
 
@@ -69,37 +70,40 @@ for corpus_spec in "${CORPORA[@]}"; do
     RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
 
     # Mojo
-    echo "  [1/4] Mojo..."
+    echo "  [1/4] Mojo..." >&2
     pixi run mojo -I . "$BMDIR/bm.mojo" > "$MOJO_OUT" 2>/dev/null
-    echo "    $(wc -l < "$MOJO_OUT") results"
+    echo "    $(wc -l < "$MOJO_OUT") results" >&2
 
     # Python tiktoken
-    echo "  [2/4] Python tiktoken..."
+    echo "  [2/4] Python tiktoken..." >&2
     "$VENV_PYTHON" "$BMDIR/benchmark_tiktoken.py" > "$PY_OUT" 2>/dev/null
-    echo "    $(wc -l < "$PY_OUT") results"
+    echo "    $(wc -l < "$PY_OUT") results" >&2
 
     # mbpe Python bindings
-    echo "  [3/4] mbpe Python bindings..."
+    echo "  [3/4] mbpe Python bindings..." >&2
     pixi run python "$BMDIR/benchmark_mbpe.py" > "$MBPE_OUT" 2>/dev/null
-    echo "    $(wc -l < "$MBPE_OUT") results"
+    echo "    $(wc -l < "$MBPE_OUT") results" >&2
 
     # Rust tiktoken-rs
     if [ -z "${BPE_NO_RUST:-}" ]; then
-        echo "  [4/4] Rust tiktoken-rs..."
-        (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1)
+        echo "  [4/4] Rust tiktoken-rs..." >&2
+        (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1 >&2)
         "$BMDIR/benchmark_rust/target/release/benchmark_rust" > "$RS_OUT" 2>/dev/null
-        echo "    $(wc -l < "$RS_OUT") results"
+        echo "    $(wc -l < "$RS_OUT") results" >&2
     else
-        echo "  [4/4] Rust tiktoken-rs: skipped (BPE_NO_RUST=1)"
+        echo "  [4/4] Rust tiktoken-rs: skipped (BPE_NO_RUST=1)" >&2
         printf '' > "$RS_OUT"
     fi
 done
 
-# ── Collate ──────────────────────────────────────────────────────
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-echo "  Results"
-echo "═══════════════════════════════════════════════════════════"
+# ── Markdown report (-> stdout) ─────────────────────────────────
+echo "" >&2
+echo "═══════════════════════════════════════════════════════════" >&2
+echo "  Generating markdown report..." >&2
+echo "═══════════════════════════════════════════════════════════" >&2
+
+# Hardware info once at the top
+"$VENV_PYTHON" "$BMDIR/hardware_info.py"
 
 for corpus_spec in "${CORPORA[@]}"; do
     CORPUS_LABEL="${corpus_spec##*:}"
@@ -109,9 +113,9 @@ for corpus_spec in "${CORPORA[@]}"; do
     RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
 
     echo ""
-    "$VENV_PYTHON" "$BMDIR/collate.py" "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT"
+    "$VENV_PYTHON" "$BMDIR/collate.py" --no-hardware "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT"
 done
 
-echo ""
-echo "Done. Raw results in $RESULTS_DIR/"
-echo ""
+echo "" >&2
+echo "Done. Raw results in $RESULTS_DIR/" >&2
+echo "" >&2
