@@ -2,11 +2,12 @@
 """Collate benchmark JSON results into comparison tables.
 
 Reads Mojo JSON (one line per (variant, vocab_size) combo),
-Python tiktoken JSON (one line per encoding), and
-Rust tiktoken-rs JSON (one line per encoding) from files,
+Python tiktoken JSON (one line per encoding),
+Rust tiktoken-rs JSON (one line per encoding), and
+mbpe Python bindings JSON (one line per encoding) from files,
 then prints markdown comparison tables.
 
-Usage:  python benchmarks/collate.py <mojo.json> <tiktoken.json> <tiktoken-rs.json>
+Usage:  python benchmarks/collate.py <mojo.json> <tiktoken.json> <tiktoken-rs.json> <mbpe.json>
 """
 
 import json
@@ -22,7 +23,9 @@ def load_json_lines(path):
                 line = line.strip()
                 if line:
                     try:
-                        results.append(json.loads(line))
+                        d = json.loads(line)
+                        if isinstance(d, dict) and "impl" in d:
+                            results.append(d)
                     except json.JSONDecodeError:
                         pass  # skip malformed lines
     except (FileNotFoundError, IOError):
@@ -160,17 +163,19 @@ def make_encode_comparison(mojo_rows, tiktoken_rows, impl_a, impl_b):
 
 
 def main():
-    if len(sys.argv) < 4:
+    if len(sys.argv) < 5:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
 
     mojo_path = sys.argv[1]
     py_path = sys.argv[2]
     rs_path = sys.argv[3]
+    mbpe_path = sys.argv[4]
 
     mojo = load_json_lines(mojo_path)
     py_tiktoken = load_json_lines(py_path)
     rs_tiktoken = load_json_lines(rs_path)
+    mbpe_py = load_json_lines(mbpe_path)
 
     # Corpus size
     n_bytes = mojo[0]['corpus_bytes'] if mojo else 0
@@ -192,6 +197,11 @@ def main():
         print(make_tiktoken_table(py_tiktoken, "Python tiktoken", "tiktoken_py"))
         print()
 
+    # mbpe Python bindings table
+    if mbpe_py:
+        print(make_tiktoken_table(mbpe_py, "mbpe Python bindings", "mbpe_py"))
+        print()
+
     # Rust tiktoken-rs table
     if rs_tiktoken:
         print(make_tiktoken_table(rs_tiktoken, "Rust tiktoken-rs", "tiktoken_rs"))
@@ -199,16 +209,19 @@ def main():
 
     # Cross-comparison: encode/decode (available benchmarks)
     py_encs = {r['encoding']: r for r in py_tiktoken}
+    mbpe_encs = {r['encoding']: r for r in mbpe_py}
     rs_encs = {r['encoding']: r for r in rs_tiktoken}
 
-    if py_encs or rs_encs:
+    if py_encs or mbpe_encs or rs_encs:
         print("### Encode/Decode Cross-Comparison (vocab_size=500 for Mojo)")
         print()
         cols = ["Encoding", "Mojo enc", "Mojo dec"]
         if py_encs:
-            cols += ["Py enc", "Py dec"]
+            cols += ["tiktoken_py enc", "tiktoken_py dec"]
+        if mbpe_encs:
+            cols += ["mbpe_py enc", "mbpe_py dec"]
         if rs_encs:
-            cols += ["Rust enc", "Rust dec"]
+            cols += ["tiktoken_rs enc", "tiktoken_rs dec"]
         header = "| " + " | ".join(cols) + " |"
         sep = "| " + " | ".join(["-" * max(len(c), 3) for c in cols]) + " |"
         print(header)
@@ -228,10 +241,31 @@ def main():
             if py_encs:
                 p = py_encs.get(enc_name, {})
                 row += [fmt_mtok(val(p, 'encode_mtok_s')), fmt_mtok(val(p, 'decode_mtok_s'))]
+            if mbpe_encs:
+                mb = mbpe_encs.get(enc_name, {})
+                row += [fmt_mtok(val(mb, 'encode_mtok_s')), fmt_mtok(val(mb, 'decode_mtok_s'))]
             if rs_encs:
                 r = rs_encs.get(enc_name, {})
                 row += [fmt_mtok(val(r, 'encode_mtok_s')), fmt_mtok(val(r, 'decode_mtok_s'))]
             print("| " + " | ".join(row) + " |")
+        print()
+
+    # mbpe_py vs tiktoken_py comparison (same API, same encodings)
+    if mbpe_py and py_tiktoken:
+        print("### mbpe Python Bindings vs Python tiktoken (encode/decode)")
+        print()
+        print("| Encoding | mbpe_py enc (M tok/s) | tiktoken_py enc (M tok/s) | mbpe_py dec (M tok/s) | tiktoken_py dec (M tok/s) |")
+        print("|----------|------------------------|---------------------------|------------------------|---------------------------|")
+        for enc_name in ["gpt2", "cl100k", "o200k"]:
+            mb = {r['encoding']: r for r in mbpe_py}.get(enc_name, {})
+            pt = {r['encoding']: r for r in py_tiktoken}.get(enc_name, {})
+            print(
+                f"| {enc_name} "
+                f"| {fmt_mtok(val(mb, 'encode_mtok_s'))} "
+                f"| {fmt_mtok(val(pt, 'encode_mtok_s')) if enc_name in py_encs else '—'} "
+                f"| {fmt_mtok(val(mb, 'decode_mtok_s'))} "
+                f"| {fmt_mtok(val(pt, 'decode_mtok_s')) if enc_name in py_encs else '—'} |"
+            )
         print()
 
     # Scaling table: per-variant, per-vocab-size

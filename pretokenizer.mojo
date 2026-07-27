@@ -442,7 +442,9 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
     0x9F, 0xA0, 0xAD,  # rank 253-255
 )
 
-trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable):
+from std.format import Writable, Writer
+
+trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     """Split raw text into "words" for BPE training and encoding.
 
     Any struct implementing this trait can be used as the PT parameter
@@ -513,6 +515,10 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable):
             reconstructs the original text (the split is a partition
             of the input byte span).
         """
+        ...
+
+    @staticmethod
+    def name() -> String:
         ...
 
     @staticmethod
@@ -630,6 +636,10 @@ struct GPreTokenizer(PreTokenizer):
         pass
 
     @staticmethod
+    def name() -> String:
+        return String("gpre")
+
+    @staticmethod
     def special_tokens() -> Dict[String, Int]:
         return Dict[String, Int]()
 
@@ -676,6 +686,9 @@ struct GPreTokenizer(PreTokenizer):
         """
         return Self.tokenize(text)
 
+    def write_to[T: Writer](self, mut writer: T):
+        writer.write(String("GPreTokenizer"))
+
 
 # ===========================================================================
 # GPT-2 / r50k_base Pre-tokenizer
@@ -700,6 +713,10 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     def __init__(out self):
         pass
+
+    @staticmethod
+    def name() -> String:
+        return String("gpt2")
 
     @staticmethod
     def special_tokens() -> Dict[String, Int]:
@@ -928,6 +945,9 @@ struct GPT2Pretokenizer(PreTokenizer):
             pos += best_len
         return result^
 
+    def write_to[T: Writer](self, mut writer: T):
+        writer.write(String("GPT2Pretokenizer"))
+
 
 # ===========================================================================
 # GPT-4 / cl100k_base Pre-tokenizer
@@ -961,6 +981,13 @@ struct GPT4Pretokenizer[
 
     def __init__(out self):
         pass
+
+    @staticmethod
+    def name() -> String:
+        comptime if Self.mapping == ByteMapping.SEQUENTIAL:
+            return String("cl100k")
+        else:
+            return String("o200k")
 
     @staticmethod
     def special_tokens() -> Dict[String, Int]:
@@ -1282,3 +1309,6 @@ struct GPT4Pretokenizer[
             result.append(String(from_utf8_lossy=byte_span))
             pos += best_len
         return result^
+
+    def write_to[T: Writer](self, mut writer: T):
+        writer.write(String("GPT4Pretokenizer"))

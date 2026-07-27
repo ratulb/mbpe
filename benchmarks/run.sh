@@ -26,11 +26,11 @@ echo "╔═══════════════════════�
 echo "║  simple_bpe  —  Multi-Language Benchmark Suite              ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
-# ── Check dependencies ───────────────────────────────────────────
-echo ""
-echo "── Dependencies ──"
+# ── Setup dependencies ──────────────────────────────────────────
+source "$BMDIR/setup_bench_env.sh"
 
-# Mojo
+echo ""
+echo "── Mojo ──"
 if command -v mojo &>/dev/null; then
     echo "  Mojo: $(mojo --version 2>&1 | head -1 | cut -d' ' -f3)"
 else
@@ -38,29 +38,15 @@ else
     exit 1
 fi
 
-# Python tiktoken
-if pixi run python -c "import tiktoken" 2>/dev/null; then
-    echo "  Python tiktoken: $(pixi run python -c 'import tiktoken; print(tiktoken.__version__)')"
-else
-    echo "  Installing tiktoken..."
-    pixi run python -m ensurepip --upgrade 2>&1 | tail -1
-    pixi run python -m pip install tiktoken 2>&1 | tail -1
-fi
-
-# Rust
-if command -v cargo &>/dev/null && [ -z "${BPE_NO_RUST:-}" ]; then
-    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$(pixi run which gcc)"
-    echo "  Rust: $(cargo --version)  linker: $CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER"
-    (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1)
-    echo "  Rust benchmark built"
-else
-    echo "  Rust: skipped (cargo not found or BPE_NO_RUST=1)"
-fi
+# Build mbpe Python bindings (shared library)
+echo "  Building mbpe.so..."
+pixi run mojo build mbpe.mojo --emit shared-lib -o mbpe.so 2>&1 | tail -1
+echo "  mbpe.so built"
 
 # ── Generate corpora ─────────────────────────────────────────────
 echo ""
 echo "── Corpora ──"
-pixi run python "$BMDIR/generate_corpora.py" 2>&1
+"$VENV_PYTHON" "$BMDIR/generate_corpora.py" 2>&1
 
 # ── Run benchmarks ───────────────────────────────────────────────
 mkdir -p "$RESULTS_DIR"
@@ -79,27 +65,33 @@ for corpus_spec in "${CORPORA[@]}"; do
 
     MOJO_OUT="$RESULTS_DIR/mojo_${CORPUS_LABEL}.json"
     PY_OUT="$RESULTS_DIR/py_${CORPUS_LABEL}.json"
+    MBPE_OUT="$RESULTS_DIR/mbpe_${CORPUS_LABEL}.json"
     RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
 
     # Mojo
-    echo "  [1/3] Mojo..."
+    echo "  [1/4] Mojo..."
     pixi run mojo -I . "$BMDIR/bm.mojo" > "$MOJO_OUT" 2>/dev/null
     echo "    $(wc -l < "$MOJO_OUT") results"
 
     # Python tiktoken
-    echo "  [2/3] Python tiktoken..."
-    pixi run python "$BMDIR/benchmark_tiktoken.py" > "$PY_OUT" 2>/dev/null
+    echo "  [2/4] Python tiktoken..."
+    "$VENV_PYTHON" "$BMDIR/benchmark_tiktoken.py" > "$PY_OUT" 2>/dev/null
     echo "    $(wc -l < "$PY_OUT") results"
 
+    # mbpe Python bindings
+    echo "  [3/4] mbpe Python bindings..."
+    pixi run python "$BMDIR/benchmark_mbpe.py" > "$MBPE_OUT" 2>/dev/null
+    echo "    $(wc -l < "$MBPE_OUT") results"
+
     # Rust tiktoken-rs
-    if command -v cargo &>/dev/null && [ -z "${BPE_NO_RUST:-}" ]; then
-        echo "  [3/3] Rust tiktoken-rs..."
-        source "$HOME/.cargo/env"
+    if [ -z "${BPE_NO_RUST:-}" ]; then
+        echo "  [4/4] Rust tiktoken-rs..."
+        (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1)
         "$BMDIR/benchmark_rust/target/release/benchmark_rust" > "$RS_OUT" 2>/dev/null
         echo "    $(wc -l < "$RS_OUT") results"
     else
-        echo "  [3/3] Rust tiktoken-rs: skipped"
-        echo "{}" > "$RS_OUT"
+        echo "  [4/4] Rust tiktoken-rs: skipped (BPE_NO_RUST=1)"
+        printf '' > "$RS_OUT"
     fi
 done
 
@@ -113,10 +105,11 @@ for corpus_spec in "${CORPORA[@]}"; do
     CORPUS_LABEL="${corpus_spec##*:}"
     MOJO_OUT="$RESULTS_DIR/mojo_${CORPUS_LABEL}.json"
     PY_OUT="$RESULTS_DIR/py_${CORPUS_LABEL}.json"
+    MBPE_OUT="$RESULTS_DIR/mbpe_${CORPUS_LABEL}.json"
     RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
 
     echo ""
-    pixi run python "$BMDIR/collate.py" "$MOJO_OUT" "$PY_OUT" "$RS_OUT"
+    "$VENV_PYTHON" "$BMDIR/collate.py" "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT"
 done
 
 echo ""

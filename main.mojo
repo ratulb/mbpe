@@ -770,7 +770,7 @@ def test_special_tokens_save_load() raises:
 
 
 def test_special_tokens_tiktoken_skip() raises:
-    """save_tiktoken skips special tokens."""
+    """S(s)ave_tiktoken skips special tokens."""
     var tok = BPETokenizer[GPreTokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
