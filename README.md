@@ -1,26 +1,25 @@
 # mbpe
 
-**BPE tokenizer in Mojo** with Python bindings. **tiktoken-compatible. ~2×** faster encode/decode.
+**A tiktoken-compatible BPE tokenizer, written from scratch in Mojo.** Drop-in replacement for OpenAI's `tiktoken`, with native encode/decode up to 2× faster — plus training, custom pre-tokenizers, and a Python API that matches `tiktoken`'s almost method-for-method.
 
----
 ```python
-# Load a pre-built encoding
-tokenizer = mbpe.get_encoding("gpt2") 
-print(tokenizer.n_vocab) # 50257 
-tokens = tokenizer.encode("hello world") 
-print(tokens) # [31373, 995]
-decoded = tokenizer.decode(tokens)
-print(decoded)
+import mbpe
+
+tokenizer = mbpe.get_encoding("gpt2")
+tokens = tokenizer.encode("hello world")
+print(tokens)                          # [31373, 995]
+print(tokenizer.decode(tokens))        # "hello world"
 ```
+
 ---
 
 ## Why mbpe?
 
-- **Drop-in replacement for `tiktoken`** — same `get_encoding()`, same `encode()` with `allowed_special`/`disallowed_special`, same `.tiktoken` format
-- **Faster** — Mojo native beats `tiktoken-rs` (Rust), and `mbpe` Python bindings beat `tiktoken` Python
-- **Train your own tokenizer** — `tokenizer.train(["hello world"], vocab_size=300)` from scratch, save to `.tiktoken` format
-- **Plug-in your own pre-tokenizer** — Mojo trait-based pre-tokenizers. Ships with pre-tokenizers for r50k_base, cl100k_base and o200k encodings
-- **Byte-level** — All 256 bytes as base vocabulary, no UNK token, lossless for any UTF-8 input
+- **Drop-in for `tiktoken`** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
+- **Fast where it counts** — Mojo native beats `tiktoken-rs` (Rust) on both encode and decode across all three stock encodings; Python bindings beat Python `tiktoken` on gpt2 and cl100k. See [Benchmarks](#benchmarks) for the full picture, including where the margins are closer.
+- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, from scratch, saved straight to `.tiktoken` format.
+- **Extensible by design** — pre-tokenizers are a Mojo trait, not a hardcoded switch. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
+- **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
 ---
 
@@ -158,6 +157,8 @@ Module-level functions:
 ## Benchmarks
 
 5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
+
+**Mojo native leads every row on both encode and decode.** The Python bindings beat Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` currently edges ahead on encode (3.9 vs 3.2 M tok/s) while `mbpe` still leads decode (42.7 vs 29.4 M tok/s) — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
 
 | Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|---|
