@@ -147,10 +147,13 @@ def _decode_with_offsets_gpre(mut self: PythonObject, mut args: PythonObject) ra
     var ends = List[Int]()
     var text = ptr[].decode_with_offsets(Span[Int](ids), starts, ends)
     var _b = Python.import_module("builtins")
-    var make_tuple = _b.eval("lambda s, e: (s, e)")
+    ref cpy = Python().cpython()
     var py_vals = List[PythonObject](capacity=len(starts))
     for i in range(len(starts)):
-        py_vals.append(make_tuple(Python.int(starts[i]), Python.int(ends[i])))
+        var tup = cpy.PyTuple_New(2)
+        _ = cpy.PyTuple_SetItem(tup, 0, cpy.PyLong_FromSsize_t(starts[i]))
+        _ = cpy.PyTuple_SetItem(tup, 1, cpy.PyLong_FromSsize_t(ends[i]))
+        py_vals.append(PythonObject(from_owned=tup))
     return _b.eval("lambda t, o: (t, o)")(PythonObject(text), Python.list(Span[PythonObject](py_vals)))
 
 def _decode_with_offsets_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -160,10 +163,13 @@ def _decode_with_offsets_gpt2(mut self: PythonObject, mut args: PythonObject) ra
     var ends = List[Int]()
     var text = ptr[].decode_with_offsets(Span[Int](ids), starts, ends)
     var _b = Python.import_module("builtins")
-    var make_tuple = _b.eval("lambda s, e: (s, e)")
+    ref cpy = Python().cpython()
     var py_vals = List[PythonObject](capacity=len(starts))
     for i in range(len(starts)):
-        py_vals.append(make_tuple(Python.int(starts[i]), Python.int(ends[i])))
+        var tup = cpy.PyTuple_New(2)
+        _ = cpy.PyTuple_SetItem(tup, 0, cpy.PyLong_FromSsize_t(starts[i]))
+        _ = cpy.PyTuple_SetItem(tup, 1, cpy.PyLong_FromSsize_t(ends[i]))
+        py_vals.append(PythonObject(from_owned=tup))
     return _b.eval("lambda t, o: (t, o)")(PythonObject(text), Python.list(Span[PythonObject](py_vals)))
 
 def _decode_with_offsets_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -173,10 +179,13 @@ def _decode_with_offsets_gpt4(mut self: PythonObject, mut args: PythonObject) ra
     var ends = List[Int]()
     var text = ptr[].decode_with_offsets(Span[Int](ids), starts, ends)
     var _b = Python.import_module("builtins")
-    var make_tuple = _b.eval("lambda s, e: (s, e)")
+    ref cpy = Python().cpython()
     var py_vals = List[PythonObject](capacity=len(starts))
     for i in range(len(starts)):
-        py_vals.append(make_tuple(Python.int(starts[i]), Python.int(ends[i])))
+        var tup = cpy.PyTuple_New(2)
+        _ = cpy.PyTuple_SetItem(tup, 0, cpy.PyLong_FromSsize_t(starts[i]))
+        _ = cpy.PyTuple_SetItem(tup, 1, cpy.PyLong_FromSsize_t(ends[i]))
+        py_vals.append(PythonObject(from_owned=tup))
     return _b.eval("lambda t, o: (t, o)")(PythonObject(text), Python.list(Span[PythonObject](py_vals)))
 
 def _decode_with_offsets_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -186,10 +195,13 @@ def _decode_with_offsets_gpt4o(mut self: PythonObject, mut args: PythonObject) r
     var ends = List[Int]()
     var text = ptr[].decode_with_offsets(Span[Int](ids), starts, ends)
     var _b = Python.import_module("builtins")
-    var make_tuple = _b.eval("lambda s, e: (s, e)")
+    ref cpy = Python().cpython()
     var py_vals = List[PythonObject](capacity=len(starts))
     for i in range(len(starts)):
-        py_vals.append(make_tuple(Python.int(starts[i]), Python.int(ends[i])))
+        var tup = cpy.PyTuple_New(2)
+        _ = cpy.PyTuple_SetItem(tup, 0, cpy.PyLong_FromSsize_t(starts[i]))
+        _ = cpy.PyTuple_SetItem(tup, 1, cpy.PyLong_FromSsize_t(ends[i]))
+        py_vals.append(PythonObject(from_owned=tup))
     return _b.eval("lambda t, o: (t, o)")(PythonObject(text), Python.list(Span[PythonObject](py_vals)))
 
 
