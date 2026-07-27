@@ -85,19 +85,19 @@ def run_one[PT: PreTokenizer](
         var ids = tok.encode(full_text)
         var num_tokens = len(ids)
 
-        # Encode — best of 20
+        # Encode — best of 3
         var encode_times = List[Int]()
         _ = tok.encode(full_text)
-        for _ in range(20):
+        for _ in range(3):
             var t0 = perf_counter_ns()
             _ = tok.encode(full_text)
             encode_times.append(Int(perf_counter_ns() - t0))
         var best_encode_ns = min_ns(encode_times)
 
-        # Decode — best of 20
+        # Decode — best of 3
         var decode_times = List[Int]()
         _ = tok.decode(ids)
-        for _ in range(20):
+        for _ in range(3):
             var t0 = perf_counter_ns()
             _ = tok.decode(ids)
             decode_times.append(Int(perf_counter_ns() - t0))

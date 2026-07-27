@@ -245,9 +245,11 @@ VARIANT_LABELS = {
 }
 
 
-def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
+def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, mojo_native, n_bytes):
     lines = []
-    lines.append("### Encode/Decode Throughput — 1.0 MB corpus")
+    mb = n_bytes / 1_048_576 if n_bytes > 0 else 0
+    corpus_label = f"{mb:.1f} MB" if mb >= 1 else f"{n_bytes // 1024} KB"
+    lines.append(f"### Encode/Decode Throughput — {corpus_label} corpus")
     lines.append("")
     lines.append("")
 
@@ -263,11 +265,14 @@ def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
     mbpe_by_enc = {r['encoding']: r for r in mbpe_py}
     py_by_enc = {r['encoding']: r for r in py_tiktoken}
     rs_by_enc = {r['encoding']: r for r in rs_tiktoken}
+    native_by_enc = {r['encoding']: r for r in mojo_native}
 
     encodings = ["gpt2", "cl100k", "o200k"]
 
     for enc in encodings:
         impls = []
+        if enc in native_by_enc:
+            impls.append(("Mojo native", native_by_enc[enc]))
         if enc in mbpe_by_enc:
             impls.append(("mbpe (Python)", mbpe_by_enc[enc]))
         if enc in py_by_enc:
@@ -298,34 +303,11 @@ def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
                 f"| {fmt_mbs(d_mbs)} |"
             )
 
-    # Native Mojo — pick GPT2 vocab=4000 as representative
-    native_row = None
-    for r in mojo:
-        if r['variant'] == 'GPT2' and r['vocab_size'] == 4000:
-            native_row = r
-            break
-    if native_row is None and mojo:
-        native_row = mojo[-1]
-
-    if native_row:
-        var_label = VARIANT_LABELS.get(native_row['variant'], native_row['variant'])
-        lines.append(
-            f"| self-trained "
-            f"| Mojo native — {var_label} "
-            f"| {native_row['n_tokens']} "
-            f"| {fmt_ms(get(native_row, 'encode_ms'))} "
-            f"| {fmt_mtok(get(native_row, 'encode_mtok_s'))} "
-            f"| {fmt_mbs(mb_per_s(n_bytes, get(native_row, 'encode_ms')))} "
-            f"| {fmt_ms(get(native_row, 'decode_ms'))} "
-            f"| {fmt_mtok(get(native_row, 'decode_mtok_s'))} "
-            f"| {fmt_mbs(mb_per_s(n_bytes, get(native_row, 'decode_ms')))} |"
-        )
-
     lines.append("")
     notes = []
 
     gpt2_tokens = {}
-    for label, lookup in [("mbpe (Python)", mbpe_by_enc), ("tiktoken (Python)", py_by_enc), ("tiktoken-rs", rs_by_enc)]:
+    for label, lookup in [("Mojo native", native_by_enc), ("mbpe (Python)", mbpe_by_enc), ("tiktoken (Python)", py_by_enc), ("tiktoken-rs", rs_by_enc)]:
         if "gpt2" in lookup:
             gpt2_tokens[label] = lookup["gpt2"].get('n_tokens')
     token_vals = {v for v in gpt2_tokens.values() if v and v != "—"}
@@ -334,13 +316,6 @@ def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
             "tiktoken-rs gpt2 token count differs from Python — likely a "
             "pre-tokenizer regex version mismatch between the tiktoken-rs crate "
             "and OpenAI/tiktoken."
-        )
-
-    if native_row:
-        notes.append(
-            "Native Mojo uses a self-trained vocabulary ("
-            f"{native_row['vocab_size']} merges) — not directly comparable to "
-            "the 50K+ merge vocabularies above. See the scaling table below."
         )
 
     for i, note in enumerate(notes):
@@ -425,7 +400,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = set(a for a in sys.argv[1:] if a.startswith("--"))
 
-    if len(args) < 4:
+    if len(args) < 5:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
 
@@ -433,11 +408,12 @@ def main():
     py_tiktoken = load_json_lines(args[1])
     rs_tiktoken = load_json_lines(args[2])
     mbpe_py = load_json_lines(args[3])
+    mojo_native = load_json_lines(args[4])
     show_hardware = "--no-hardware" not in flags
 
     # Corpus size from first available row
     n_bytes = 0
-    for r in mojo + py_tiktoken + rs_tiktoken + mbpe_py:
+    for r in mojo + py_tiktoken + rs_tiktoken + mbpe_py + mojo_native:
         b = r.get('corpus_bytes', 0)
         if b:
             n_bytes = b
@@ -464,7 +440,7 @@ def main():
     print()
 
     # 3. Combined comparison table
-    print(make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes))
+    print(make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, mojo_native, n_bytes))
     print()
 
     # 4. Native Mojo pipeline (only if we have Mojo data)

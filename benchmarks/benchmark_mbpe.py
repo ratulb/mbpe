@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python-binding
 import mbpe
 
 
-def bench_encoding(name: str, enc, text: str, n_bytes: int, n_iters: int = 20):
+def bench_encoding(name: str, enc, text: str, n_bytes: int, n_iters: int = 3):
     t0 = time.perf_counter_ns()
     tokens = enc.encode(text)
     t1 = time.perf_counter_ns()

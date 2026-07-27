@@ -36,22 +36,26 @@ MOJO_OUT="$RESULTS_DIR/mojo_1MB.json"
 PY_OUT="$RESULTS_DIR/py_1MB.json"
 MBPE_OUT="$RESULTS_DIR/mbpe_1MB.json"
 RS_OUT="$RESULTS_DIR/rs_1MB.json"
+NATIVE_OUT="$RESULTS_DIR/native_1MB.json"
 
-echo "  [1/5] Mojo..." >&2
+echo "  [1/6] Mojo (training pipeline)..." >&2
 pixi run mojo -I . "$BMDIR/bm.mojo" > "$MOJO_OUT" 2>/dev/null
 
-echo "  [2/5] Python tiktoken..." >&2
+echo "  [2/6] Mojo native (pre-built vocabs)..." >&2
+pixi run mojo -I . "$BMDIR/bm_pretrained.mojo" > "$NATIVE_OUT" 2>/dev/null
+
+echo "  [3/6] Python tiktoken..." >&2
 "$VENV_PYTHON" "$BMDIR/benchmark_tiktoken.py" > "$PY_OUT" 2>/dev/null
 
-echo "  [3/5] mbpe Python bindings (quick, n_iters=3)..." >&2
+echo "  [4/6] mbpe Python bindings (quick, n_iters=3)..." >&2
 pixi run python "$BMDIR/benchmark_mbpe_quick.py" > "$MBPE_OUT" 2>/dev/null
 
-echo "  [4/5] Rust tiktoken-rs..." >&2
+echo "  [5/6] Rust tiktoken-rs..." >&2
 (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1 >&2)
 "$BMDIR/benchmark_rust/target/release/benchmark_rust" > "$RS_OUT" 2>/dev/null
 
-echo "  [5/5] Generating markdown report..." >&2
+echo "  [6/6] Generating markdown report..." >&2
 echo "" >&2
 
 # ── Markdown report (-> stdout) ─────────────────────────────────
-"$VENV_PYTHON" "$BMDIR/collate.py" "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT"
+"$VENV_PYTHON" "$BMDIR/collate.py" "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT" "$NATIVE_OUT"

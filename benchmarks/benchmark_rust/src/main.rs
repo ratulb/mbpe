@@ -65,7 +65,7 @@ fn main() {
     let text = std::fs::read_to_string(&corpus_path).expect("Failed to read corpus");
     let n_bytes = text.len();
 
-    let n_iters = 20;
+    let n_iters = 3;
 
     // p50k_base (GPT-2)
     let bpe_p50k = tiktoken_rs::p50k_base().unwrap();
@@ -74,4 +74,8 @@ fn main() {
     // cl100k_base (GPT-4)
     let bpe_cl100k = tiktoken_rs::cl100k_base().unwrap();
     println!("{}", bench_encoding("cl100k", &bpe_cl100k, &text, n_bytes, n_iters));
+
+    // o200k_base (GPT-4o)
+    let bpe_o200k = tiktoken_rs::o200k_base().unwrap();
+    println!("{}", bench_encoding("o200k", &bpe_o200k, &text, n_bytes, n_iters));
 }

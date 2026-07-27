@@ -18,7 +18,7 @@ except ImportError:
     raise
 
 
-def bench_encoding(name: str, enc, text: str, n_bytes: int, n_iters: int = 20):
+def bench_encoding(name: str, enc, text: str, n_bytes: int, n_iters: int = 3):
     # First encode to get token count
     t0 = time.perf_counter_ns()
     tokens = enc.encode(text)
@@ -85,6 +85,10 @@ def main():
     # GPT-4 (cl100k_base)
     enc_cl100k = tiktoken.get_encoding("cl100k_base")
     results.append(bench_encoding("cl100k", enc_cl100k, text, n_bytes))
+
+    # GPT-4o (o200k_base)
+    enc_o200k = tiktoken.get_encoding("o200k_base")
+    results.append(bench_encoding("o200k", enc_o200k, text, n_bytes))
 
     # Print JSON lines (one per encoding)
     for r in results:

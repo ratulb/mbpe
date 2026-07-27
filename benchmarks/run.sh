@@ -68,30 +68,36 @@ for corpus_spec in "${CORPORA[@]}"; do
     PY_OUT="$RESULTS_DIR/py_${CORPUS_LABEL}.json"
     MBPE_OUT="$RESULTS_DIR/mbpe_${CORPUS_LABEL}.json"
     RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
+    NATIVE_OUT="$RESULTS_DIR/native_${CORPUS_LABEL}.json"
 
-    # Mojo
-    echo "  [1/4] Mojo..." >&2
+    # Mojo (training pipeline)
+    echo "  [1/5] Mojo training pipeline..." >&2
     pixi run mojo -I . "$BMDIR/bm.mojo" > "$MOJO_OUT" 2>/dev/null
     echo "    $(wc -l < "$MOJO_OUT") results" >&2
 
+    # Mojo native (pre-built vocabs)
+    echo "  [2/5] Mojo native pre-built..." >&2
+    pixi run mojo -I . "$BMDIR/bm_pretrained.mojo" > "$NATIVE_OUT" 2>/dev/null
+    echo "    $(wc -l < "$NATIVE_OUT") results" >&2
+
     # Python tiktoken
-    echo "  [2/4] Python tiktoken..." >&2
+    echo "  [3/5] Python tiktoken..." >&2
     "$VENV_PYTHON" "$BMDIR/benchmark_tiktoken.py" > "$PY_OUT" 2>/dev/null
     echo "    $(wc -l < "$PY_OUT") results" >&2
 
     # mbpe Python bindings
-    echo "  [3/4] mbpe Python bindings..." >&2
+    echo "  [4/5] mbpe Python bindings..." >&2
     pixi run python "$BMDIR/benchmark_mbpe.py" > "$MBPE_OUT" 2>/dev/null
     echo "    $(wc -l < "$MBPE_OUT") results" >&2
 
     # Rust tiktoken-rs
     if [ -z "${BPE_NO_RUST:-}" ]; then
-        echo "  [4/4] Rust tiktoken-rs..." >&2
+        echo "  [5/5] Rust tiktoken-rs..." >&2
         (cd "$BMDIR/benchmark_rust" && cargo build --release 2>&1 | tail -1 >&2)
         "$BMDIR/benchmark_rust/target/release/benchmark_rust" > "$RS_OUT" 2>/dev/null
         echo "    $(wc -l < "$RS_OUT") results" >&2
     else
-        echo "  [4/4] Rust tiktoken-rs: skipped (BPE_NO_RUST=1)" >&2
+        echo "  [5/5] Rust tiktoken-rs: skipped (BPE_NO_RUST=1)" >&2
         printf '' > "$RS_OUT"
     fi
 done
@@ -102,18 +108,16 @@ echo "════════════════════════�
 echo "  Generating markdown report..." >&2
 echo "═══════════════════════════════════════════════════════════" >&2
 
-# Hardware info once at the top
-"$VENV_PYTHON" "$BMDIR/hardware_info.py"
-
 for corpus_spec in "${CORPORA[@]}"; do
     CORPUS_LABEL="${corpus_spec##*:}"
     MOJO_OUT="$RESULTS_DIR/mojo_${CORPUS_LABEL}.json"
     PY_OUT="$RESULTS_DIR/py_${CORPUS_LABEL}.json"
     MBPE_OUT="$RESULTS_DIR/mbpe_${CORPUS_LABEL}.json"
     RS_OUT="$RESULTS_DIR/rs_${CORPUS_LABEL}.json"
+    NATIVE_OUT="$RESULTS_DIR/native_${CORPUS_LABEL}.json"
 
     echo ""
-    "$VENV_PYTHON" "$BMDIR/collate.py" --no-hardware "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT"
+    "$VENV_PYTHON" "$BMDIR/collate.py" --no-hardware "$MOJO_OUT" "$PY_OUT" "$RS_OUT" "$MBPE_OUT" "$NATIVE_OUT"
 done
 
 echo "" >&2
