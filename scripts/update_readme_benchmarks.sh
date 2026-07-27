@@ -51,7 +51,7 @@ def tok_fmt(n):
 encodings = ['gpt2', 'cl100k', 'o200k']
 
 print('| Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |')
-print('|---|---|---|---|')
+print('|---|---|---|---|---|')
 
 for enc in encodings:
     n = native[enc]
@@ -91,7 +91,7 @@ lines = open('/tmp/rb_mojo_train.json').read().strip().splitlines()
 gpt4_rows = [json.loads(l) for l in lines]
 
 print('| Vocab size | 500 | 1000 | 2000 | 4000 |')
-print('|---|---|---|---|')
+print('|---|---|---|---|---|')
 train = [str(int(r['train_ms'])) + ' ms' for r in gpt4_rows]
 print(f'| Train time | {\" | \".join(train)} |')
 ms = [str(r['train_merges_s']) for r in gpt4_rows]
@@ -112,20 +112,20 @@ with open('$README') as f:
 enc_block = open('/tmp/rb_encode_decode_table.txt').read().strip()
 trn_block = open('/tmp/rb_training_table.txt').read().strip()
 
-# Replace encode/decode table (match header through to just before Training section)
+# Replace encode/decode table (match header through to blank line before Training section)
 enc_start = r'\| Encoding \| Implementation \| Tokens \| Encode \(M tok/s\) \| Decode \(M tok/s\) \|'
 content = re.sub(
-    enc_start + r'.*?(?=\n\*\*Training throughput)',
-    enc_block,
+    enc_start + r'.*?\n\n(?=\*\*Training throughput)',
+    enc_block + '\n',
     content,
     flags=re.DOTALL,
 )
 
-# Replace training section (from **Training** through to just before Environment line)
+# Replace training section (from **Training** to blank line before Environment line)
 trn_start = r'\*\*Training throughput\*\*'
-trn_replacement = f'**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):\n\n{trn_block}'
+trn_replacement = f'**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):\n\n{trn_block}\n'
 content = re.sub(
-    trn_start + r'.*?(?=\n\*Environment:)',
+    trn_start + r'.*?\n\n(?=\*Environment:)',
     trn_replacement,
     content,
     flags=re.DOTALL,
