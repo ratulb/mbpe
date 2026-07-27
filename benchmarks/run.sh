@@ -39,9 +39,9 @@ else
 fi
 
 # Build mbpe Python bindings (shared library)
-echo "  Building mbpe.so..."
-pixi run mojo build mbpe.mojo --emit shared-lib -o mbpe.so 2>&1 | tail -1
-echo "  mbpe.so built"
+echo "  Building _mbpe.so..."
+pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so 2>&1 | tail -1
+echo "  _mbpe.so built"
 
 # ── Generate corpora ─────────────────────────────────────────────
 echo ""

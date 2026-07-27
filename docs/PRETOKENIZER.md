@@ -2,7 +2,7 @@
 
 ## The Problem
 
-Our `PreTokenizer` (`tokenizer.mojo`) uses a `Ġ` (U+0120) convention inherited
+Our `PreTokenizer` (`bpe/pretokenizer.mojo`) uses a `Ġ` (U+0120) convention inherited
 from the GPT-2 Python reference implementation (`encoder.py`): spaces at word
 boundaries are replaced with `Ġ` during pre-tokenization, and decode must
 reverse the substitution (`Ġ → 0x20`).
@@ -79,7 +79,7 @@ deviations from the GPT-2 tokenizer that our project targets:
 
 ## Implementation Status
 
-✅ **GPT2Pretokenizer** (`pretokenizer.mojo:712+`) implements all 7 GPT-2 pattern alternatives as hand-written UTF-8 matchers. The bpe.mojo pretokenizer (cl100k_base) was adapted to match GPT-2's r50k_base exactly:
+✅ **GPT2Pretokenizer** (`bpe/pretokenizer.mojo`) implements all 7 GPT-2 pattern alternatives as hand-written UTF-8 matchers. The bpe.mojo pretokenizer (cl100k_base) was adapted to match GPT-2's r50k_base exactly:
 - Case-sensitive contractions (`'(?:[sdmt]|ll|ve|re)`)
 - ` ?\p{L}++` — optional space + Unicode letters
 - ` ?\p{N}++` — optional space + digits, no max
@@ -88,7 +88,7 @@ deviations from the GPT-2 tokenizer that our project targets:
 - `\s+(?!\S)` — whitespace not followed by non-space (byte-level lookahead)
 - `\s` — single whitespace fallback
 
-✅ **GPT4Pretokenizer** (`pretokenizer.mojo:1007+`) retains the cl100k_base pattern from bpe.mojo (case-insensitive contractions, 3-digit max, newline rule, etc.).
+✅ **GPT4Pretokenizer** (`bpe/pretokenizer.mojo`) retains the cl100k_base pattern from bpe.mojo (case-insensitive contractions, 3-digit max, newline rule, etc.).
 
 With these matchers the pretokenizer split output matches tiktoken exactly, and
 the `Ġ` convention is no longer needed — decode is a direct byte concatenation.

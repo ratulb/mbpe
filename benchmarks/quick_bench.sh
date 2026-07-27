@@ -12,8 +12,8 @@ CORPUS_PATH="$BMDIR/$CORPUS"
 # Set up dependencies (Rust + tiktoken venv in /tmp)
 source "$BMDIR/setup_bench_env.sh"
 
-# Build mbpe.so if stale
-pixi run mojo build mbpe.mojo --emit shared-lib -o mbpe.so 2>/dev/null
+# Build _mbpe.so if stale
+pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so 2>/dev/null
 
 # Generate corpora if missing
 if [ ! -f "$CORPUS_PATH" ]; then

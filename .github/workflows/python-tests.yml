@@ -1,0 +1,17 @@
+name: Python tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.8
+        with:
+          pixi-version: latest
+          environments: dev
+      - name: Build Mojo shared library
+        run: pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so
+      - name: Run tests
+        run: pixi run --environment dev python -m pytest tests/python/ -v --tb=short
+      - name: Coverage
+        run: pixi run --environment dev python -m pytest tests/python/ --cov=mbpe --cov-report=term-missing

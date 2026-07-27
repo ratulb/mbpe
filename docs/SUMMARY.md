@@ -58,20 +58,19 @@
 - *(none)*
 
 ## Next Move
-1. **Phase 1 Python bindings** — minimal v0: single `simple_bpe.so`, `BPETokenizer[GPreTokenizer]` exposed, `get_encoding("gpt2")` loads bundled .tiktoken, `train`/`encode`/`decode`/`save`/`load` work from Python
-2. **Phase 2** — add GPT2 + GPT4 tokenizer types, module-level `train()` factory with `pretokenizer=` kwarg, `register_special_tokens`, `save_tiktoken`/`load_tiktoken`
-3. **Phase 3** — tiktoken API parity: `decode_bytes`, `decode_single_token_bytes`, `token_byte_values`, `encode_single_token`, batch methods
-4. **Benchmark: restore stable training iters** (currently 1 for speed; restore to 3 for final publication numbers)
+1-3. **Python bindings** — Phase 1-3 ✅ all implemented (4 tokenizer types, tiktoken API parity, training factory, bundled encodings)
+4. **Batch methods** — `encode_batch`/`decode_batch` (last missing tiktoken feature)
+5. **CI pipeline** — GitHub Actions for Mojo tests + Python tests
 
 ## Relevant Files
-- `/home/tenmoomnet/simple_bpe/tokenizer.mojo`: BPETokenizer[PT] — train, encode, decode, save/load, PairCache, special tokens
-- `/home/tenmoomnet/simple_bpe/pretokenizer.mojo`: PreTokenizer trait, ByteMapping, 3 implementations
-- `/home/tenmoomnet/simple_bpe/main.mojo`: 36 tests
-- `/home/tenmoomnet/simple_bpe/tests/test_tokenizer.mojo`: 9 tests
-- `/home/tenmoomnet/simple_bpe/tests/exhaustive_tokenizer.mojo`: 33 tests (Phase 1-3)
-- `/home/tenmoomnet/simple_bpe/BENCHMARK_PLAN.md`: Benchmark plan with 13 milestones
-- `/home/tenmoomnet/simple_bpe/PYTHON_BINDINGS_PLAN.md`: Python bindings plan (tiktoken-compatible API)
-- `/home/tenmoomnet/simple_bpe/benchmarks/`: Full benchmark suite
+- `bpe/tokenizer.mojo`: BPETokenizer[PT] — train, encode, decode, save/load, PairCache, special tokens
+- `bpe/pretokenizer.mojo`: PreTokenizer trait, ByteMapping, 3 implementations
+- `main.mojo`: 36 tests
+- `tests/test_tokenizer.mojo`: 9 tests
+- `tests/exhaustive_tokenizer.mojo`: 33 tests (Phase 1-3)
+- `docs/BENCHMARK_PLAN.md`: Benchmark plan with milestones
+- `docs/PYTHON_BINDINGS_PLAN.md`: Python bindings plan (tiktoken-compatible API)
+- `benchmarks/`: Full benchmark suite
   - `benchmark.mojo` — shared helpers, `run_all()`, `run_one[PT]()`
   - `bm.mojo` — entry point calling `run_all()`
   - `benchmark_tiktoken.py` — Python tiktoken (gpt2 + cl100k)
@@ -80,4 +79,4 @@
   - `collate.py` — markdown table collation from JSON
   - `build_summary.py` — cross-size summary tables
   - `generate_corpora.py` — corpus size generation
-- `/home/tenmoomnet/simple_bpe/SUMMARY.md`: This file — session summary and next moves
+- `docs/SUMMARY.md`: This file — session summary and next moves

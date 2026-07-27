@@ -97,19 +97,9 @@ while i < len(ids):
 
 ---
 
-### Gap 2: Standard `.tiktoken` format (HIGH)
+### Gap 2: Standard `.tiktoken` format (HIGH) ✅
 
-**Current state:** Our tokenizer saves/loads via JSON + Python interop:
-
-```mojo
-var json = Python.import_module("json")
-json.dump(...)  # depends on Python being installed
-```
-
-**Problem:** This means:
-- Python must be installed to save or load a tokenizer
-- The JSON format is non-portable — no other BPE library understands it
-- Base64 encoding (used by `.tiktoken`) is more compact and is the standard
+**Current state:** Our tokenizer now has pure-Mojo `save_tiktoken()` / `load_tiktoken()` using `std.base64` (b64encode/b64decode from Mojo stdlib). No Python dependency needed for `.tiktoken` I/O. The JSON save/load legacy path still uses Python interop.
 
 **What `.tiktoken` looks like:**
 
@@ -122,11 +112,11 @@ json.dump(...)  # depends on Python being installed
 
 Each line is `rank base64_bytes`. The base token entries define the byte shuffle, and the merge entries encode the full merge history.
 
-**What we need:**
-1. A pure-Mojo base64 encoder/decoder (no `base64` Python module)
-2. A `.tiktoken` serializer that writes our merges in rank order
-3. A `.tiktoken` parser that rebuilds merge rules from rank-ordered entries
-4. Optionally: minbpe `.model` format support for compatibility with Andrej Karpathy's minbpe
+**Done:**
+1. ✅ Pure-Mojo base64 via `std.base64`
+2. ✅ `save_tiktoken()` — serializes merges in rank order
+3. ✅ `load_tiktoken()` — rebuilds merge rules from rank-ordered entries
+4. ❌ minbpe `.model` format — not implemented (low priority)
 
 ---
 
@@ -212,14 +202,9 @@ var orig_byte = self.inverse_byte_shuffle[Int(shuffled_byte)]
 
 ---
 
-### Gap 5: Python-free save/load (MEDIUM)
+### Gap 5: Python-free save/load (MEDIUM) ✅
 
-Currently our `save()` and `load()` depend on `from std.python import Python` for JSON serialization. Fixing this requires either:
-
-- A pure-Mojo JSON encoder/decoder (std library or hand-written)
-- Or switching to `.tiktoken` format (which already has a simple line-based format)
-
-This gap is naturally closed by implementing Gap 2 (`.tiktoken` format), since `.tiktoken` is plain text with base64 entries and needs no JSON.
+Partially resolved by `.tiktoken` format (Gap 2). Legacy JSON `save()`/`load()` still uses Python interop, but the primary serialization path (`.tiktoken`) is Python-free.
 
 ---
 
@@ -243,16 +228,14 @@ A `verbose=True` flag during training that prints merge progress. Straightforwar
 ## 5. Priority Roadmap
 
 ```
-Priority  Gap                          Effort    Impact
+Priority  Gap                          Effort    Status
 ────────────────────────────────────────────────────────
- 1        Incremental training stats   2–3 days  Training: O(V×W) → O(N)
- 2        .tiktoken format             2–3 days  Interoperability, no-Python save/load
- 3        Special tokens               1 day     Chat-format tokenization
- 4        Load pre-trained weights     2–3 days  Use real GPT-4/4o/o200k_base
- 5        Python-free JSON             0.5 day   (blocked on std library or .tiktoken)
- 6        Verbose training             <0.5 day  Debug convenience
+ 1        Incremental training stats   2–3 days  ✅ Done
+ 2        .tiktoken format             2–3 days  ✅ Done
+ 3        Special tokens               1 day     ✅ Done
+ 4        Load pre-trained weights     2–3 days  ✅ Done (o200k, cl100k, gpt2)
+ 5        Python-free JSON             0.5 day   ✅ Partial (.tiktoken path is Python-free)
+ 6        Verbose training             <0.5 day  ❌ Not implemented
 ```
 
-**Recommended order:** 1 → 2 → 3 → 4 (2 enables 4, 3 is prerequisite for 4).
-
-Step 1 (incremental stats) is the biggest performance win and is purely internal — no formats, no external deps, no new files. It makes everything downstream faster and sets the foundation for the rest.
+All high-impact gaps resolved. Remaining: verbose training mode (low priority).

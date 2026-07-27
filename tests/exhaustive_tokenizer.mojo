@@ -11,7 +11,7 @@ These tests require no source changes.  They cover:
   - Property-based invariants (merge ranks increasing)
 """
 
-from tokenizer import BPETokenizer
+from bpe.tokenizer import BPETokenizer
 from std.testing import assert_equal, assert_true, TestSuite
 
 

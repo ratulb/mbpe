@@ -360,17 +360,17 @@ The `chr` function converts an Int codepoint to a single-character String.
 
 ---
 
-## 7. File Changes
+## 7. File Changes (as-implemented)
 
 ```
-simple_bpe/
-├── tokenizer.mojo    # add: _bytes_key, _bpe, _recover_merges,
-│                     #      save_tiktoken, load_tiktoken
-├── main.mojo         # add: test_save_tiktoken, test_tiktoken_roundtrip,
-│                     #      test_load_o200k_base
+mbpe/
+├── bpe/tokenizer.mojo       # _bytes_key, _bpe, _recover_merges,
+│                            # save_tiktoken, load_tiktoken
+├── main.mojo                # test_save_tiktoken, test_tiktoken_roundtrip,
+│                            # test_load_o200k_base
 ```
 
-No new files or directories.  No external dependencies.
+Implemented within existing files. No external dependencies.
 
 ---
 

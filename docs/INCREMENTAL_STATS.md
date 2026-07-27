@@ -444,7 +444,7 @@ and rebuilding the entire pair-freq dict.
 
 ## Implementation Status
 
-✅ **Fully implemented** in `tokenizer.mojo:349-439` (`train()` method).
+✅ **Fully implemented** in `bpe/tokenizer.mojo` (`train()` method, incremental stats section).
 
 The algorithm described in this document was ported from `bpe.mojo/bpe/basic_tokenizer.mojo`
 (lines 114–230) and adapted for our `BPETokenizer[PT]` architecture. Key differences from bpe.mojo:

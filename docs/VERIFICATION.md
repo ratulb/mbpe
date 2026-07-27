@@ -85,14 +85,14 @@ apply same algorithm → token IDs must match bit-for-bit.
   If mismatches appear, the second step is to cross-check against tiktoken's own
   `_encode_via_mergeable` byte output.
 
-## Execution check-list
+## Execution check-list (all ✅)
 
-- [ ] Save VERIFICATION.md
-- [ ] Write `benchmarks/reference_splits.py` — generates reference splits using Python `regex`
-- [ ] Write Mojo tests for Level A (pre-tokenizer alignment)
-- [ ] Run Level A, fix any mismatches
-- [ ] Write `benchmarks/verify_encoding.py` — loads Mojo merges, applies encode in Python
-- [ ] Write Mojo tests for Level B (end-to-end encoding)
-- [ ] Run Level B, fix any mismatches
-- [ ] Wire both into `main.mojo` (Level C)
-- [ ] Full test suite pass `mojo main.mojo`
+- [x] Save VERIFICATION.md
+- [x] Write `benchmarks/reference_splits.py` — generates reference splits using Python `regex`
+- [x] Write Mojo tests for Level A (pre-tokenizer alignment) — `test_gpre_splits`, `test_gpt2_splits`, `test_gpt4_splits`, `test_split_counts`
+- [x] Run Level A, fix any mismatches
+- [x] Write `benchmarks/verify_encoding.py` — loads Mojo merges, applies encode in Python
+- [x] Write Mojo tests for Level B (end-to-end encoding) — `test_tiktoken_roundtrip`, `test_tiktoken_vs_json_parity`
+- [x] Run Level B, fix any mismatches
+- [x] Wire both into `main.mojo` (Level C)
+- [x] Full test suite pass: 78 tests (36 main.mojo + 9 test_tokenizer + 33 exhaustive_tokenizer)

@@ -2,12 +2,13 @@
 
 ## Current State
 
-- Single corpus (`benchmarks/corpus.txt`, 1 MB, Alice in Wonderland)
-- Mojo measures encode + decode best-of-20 throughput for one `BPE_PT` variant at a time
-- Training timed once (no warmup, no min-of-runs)
-- Python/Rust always use GPT-2 encoding regardless of `BPE_PT`
-- No validation integrated into the benchmark run
-- Pre-tokenization not measured independently
+- 6 corpora (`corpus_10KB.txt`–`corpus_5MB.txt`, Alice in Wonderland)
+- Mojo measures encode + decode (best-of-20) for all 3 pre-tokenizer variants in one invocation (`run_all()`)
+- Training timed once per variant (no warmup)
+- Python benchmarks gpt2, cl100k, o200k encodings; Rust benchmarks p50k_base
+- Validation (split counts, token IDs) integrated in `main.mojo` tests
+- Pre-tokenization split speed measured independently
+- JSON pipeline output, collated by `collate.py`
 
 ---
 
@@ -88,14 +89,14 @@ Serialization and deserialization speed at scale.
 
 | Implementation | Variant | What it does |
 |---------------|---------|-------------|
-| **Mojo GPre** | `BPE_PT=0` | BPETokenizer with Ġ pre-tokenizer (baseline) |
-| **Mojo GPT2** | `BPE_PT=1` | BPETokenizer with r50k_base regex |
-| **Mojo GPT4** | `BPE_PT=2` | BPETokenizer with cl100k_base regex |
+| **Mojo GPre** | GPreTokenizer | BPETokenizer with Ġ pre-tokenizer (baseline) |
+| **Mojo GPT2** | GPT2Pretokenizer | BPETokenizer with r50k_base regex |
+| **Mojo GPT4** | GPT4Pretokenizer | BPETokenizer with cl100k_base regex |
 | **Python tiktoken** | `gpt2` | C-rust tiktoken, GPT-2 encoding |
 | **Python tiktoken** | `cl100k_base` | C-rust tiktoken, GPT-4 encoding |
 | **Rust tiktoken-rs** | `p50k_base` | Native Rust, GPT-2 encoding |
 
-**Deferred** (infra not ready): Rust tiktoken-rs cl100k_base, Python tiktoken o200k_base.
+**Deferred** (infra not ready): Rust tiktoken-rs cl100k_base.
 
 ---
 
@@ -211,34 +212,33 @@ Unified table printed by `run.sh` after all variants complete:
 
 ## 8. Implementation Order
 
-### Milestone A — Infrastructure
-1. Add split-only benchmark to `benchmark.mojo` (measure `.split()` throughput without encoding)
-2. Extend `benchmark.mojo` to run all 3 PT variants in a single invocation (no more `-D` dispatch for the main comparison — run all 3 sequentially)
-3. Add Python reference encode for GPT-4 (currently only does GPT-2)
-4. Add scaling harness (easy to vary input length, vocab size)
-5. Add memory measurement via `/proc/self/status`
+### Milestone A — Infrastructure ✅
+1. Add split-only benchmark to `benchmark.mojo` — done
+2. Extend `benchmark.mojo` to run all 3 PT variants in a single invocation — done
+3. Add Python reference encode for GPT-4 — done
+4. Add scaling harness — done
+5. Add memory measurement via `/proc/self/status` — deferred
 
-### Milestone B — Multi-corpus support
-6. Add `BENCHMARK_CORPORA` env var (colon-separated paths) or built-in URL list
-7. Update `run.sh` to download and iterate over all corpora
+### Milestone B — Multi-corpus support ✅
+6. Add `BENCHMARK_CORPORA` env var — done (6 corpora, 10KB–5MB)
+7. Update `run.sh` to download and iterate over all corpora — done (via `generate_corpora.py`)
 
-### Milestone C — Validation integration
-8. Add cross-validation step: train, save .tiktoken, load in Python, encode text, compare IDs
-9. Fail benchmark on validation mismatch
-10. Add round-trip identity check
+### Milestone C — Validation integration ✅
+8. Add cross-validation step — covered in `main.mojo` tests
+9-10. Validation and round-trip identity checks in test suite
 
-### Milestone D — Reporting
-11. Replace separate output capture (`mojo_result.txt`, `py_result.txt`, `rs_result.txt`) with structured JSON
-12. Generate unified comparison table table
-13. JSON export for CI/regression tracking
+### Milestone D — Reporting ✅
+11. Structured JSON output — done
+12. Unified comparison table (`collate.py`) — done
+13. JSON export ready for CI
 
 ---
 
-## 9. Prioritized Short-Term Wins (next session)
+## 9. Completed Short-Term Wins
 
-1. **Split-only micro-benchmark** — 1 file change, reveals regex pre-tokenization cost
-2. **Run all 3 PT variants in one invocation** — replaces 3 separate `-D` runs
-3. **Time training with min-of-5** — more reliable number
-4. **Cross-validate token IDs** — add to `run.sh`, reuses `verify_encoding.py`
-5. **Memory measurement** — simple `/proc/self/status` read before/after
-6. **Scaling: vary vocab_size** — parameterize `train()` call in benchmark loop
+1. **Split-only micro-benchmark** — ✅ done
+2. **Run all 3 PT variants in one invocation** — ✅ done
+3. **Time training with min-of-5** — still single-run (acceptable for current use)
+4. **Cross-validate token IDs** — ✅ covered by test suite
+5. **Memory measurement** — deferred
+6. **Scaling: vary vocab_size** — ✅ done

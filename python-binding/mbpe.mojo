@@ -1,13 +1,13 @@
 """Python bindings for mbpe — all 4 BPETokenizer variants.
 
-Build: mojo build mbpe.mojo --emit shared-lib -o mbpe.so
-Use:   PYTHONPATH=. python -c "import mbpe; tok = mbpe.GPreTokenizer()"
+Build: mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so
+Use:   PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPreTokenizer()"
 """
 
 from std.python import Python, PythonObject
 from std.python.bindings import PythonModuleBuilder
-from tokenizer import BPETokenizer
-from pretokenizer import (
+from bpe.tokenizer import BPETokenizer
+from bpe.pretokenizer import (
     GPreTokenizer,
     GPT2Pretokenizer,
     GPT4Pretokenizer,
@@ -247,10 +247,6 @@ def _decode_gpre(mut self: PythonObject, mut args: PythonObject) raises -> Pytho
 def _n_vocab_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args; return PythonObject(len(self.downcast_value_ptr[GPreTK]()[]))
 
-def _save_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    self.downcast_value_ptr[GPreTK]()[].save(String(args[0]))
-    return PythonObject(None)
-
 def _save_tiktok_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     self.downcast_value_ptr[GPreTK]()[].save_tiktoken(String(args[0]))
     return PythonObject(None)
@@ -259,12 +255,25 @@ def _load_tiktok_gpre(mut self: PythonObject, mut args: PythonObject) raises -> 
     self.downcast_value_ptr[GPreTK]()[].load_tiktoken(String(args[0]))
     return PythonObject(None)
 
-def _load_gpre(path: PythonObject) raises -> PythonObject:
-    return PythonObject(alloc=GPreTK.load(String(path)))
-
 def _reg_special_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPreTK]()
     var tokens = _py_dict_to_mojo(args[0])
+    ptr[].register_special_tokens(tokens^)
+    return PythonObject(None)
+
+def _get_specials_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    _ = args
+    var ptr = self.downcast_value_ptr[GPreTK]()
+    var result = Python.evaluate("{}")
+    for item in ptr[].special_bytes.items():
+        result[PythonObject(item.key)] = Python.int(item.value)
+    return result
+
+def _set_specials_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPreTK]()
+    var tokens = _py_dict_to_mojo(args[0])
+    ptr[].special_bytes = Dict[String, Int]()
+    ptr[].inverse_special = Dict[Int, String]()
     ptr[].register_special_tokens(tokens^)
     return PythonObject(None)
 
@@ -307,10 +316,6 @@ def _decode_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> Pytho
 def _n_vocab_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args; return PythonObject(len(self.downcast_value_ptr[GPT2TK]()[]))
 
-def _save_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    self.downcast_value_ptr[GPT2TK]()[].save(String(args[0]))
-    return PythonObject(None)
-
 def _save_tiktok_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     self.downcast_value_ptr[GPT2TK]()[].save_tiktoken(String(args[0]))
     return PythonObject(None)
@@ -319,12 +324,25 @@ def _load_tiktok_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> 
     self.downcast_value_ptr[GPT2TK]()[].load_tiktoken(String(args[0]))
     return PythonObject(None)
 
-def _load_gpt2(path: PythonObject) raises -> PythonObject:
-    return PythonObject(alloc=GPT2TK.load(String(path)))
-
 def _reg_special_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
     var tokens = _py_dict_to_mojo(args[0])
+    ptr[].register_special_tokens(tokens^)
+    return PythonObject(None)
+
+def _get_specials_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    _ = args
+    var ptr = self.downcast_value_ptr[GPT2TK]()
+    var result = Python.evaluate("{}")
+    for item in ptr[].special_bytes.items():
+        result[PythonObject(item.key)] = Python.int(item.value)
+    return result
+
+def _set_specials_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPT2TK]()
+    var tokens = _py_dict_to_mojo(args[0])
+    ptr[].special_bytes = Dict[String, Int]()
+    ptr[].inverse_special = Dict[Int, String]()
     ptr[].register_special_tokens(tokens^)
     return PythonObject(None)
 
@@ -367,10 +385,6 @@ def _decode_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> Pytho
 def _n_vocab_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args; return PythonObject(len(self.downcast_value_ptr[GPT4TK]()[]))
 
-def _save_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    self.downcast_value_ptr[GPT4TK]()[].save(String(args[0]))
-    return PythonObject(None)
-
 def _save_tiktok_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     self.downcast_value_ptr[GPT4TK]()[].save_tiktoken(String(args[0]))
     return PythonObject(None)
@@ -379,12 +393,25 @@ def _load_tiktok_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> 
     self.downcast_value_ptr[GPT4TK]()[].load_tiktoken(String(args[0]))
     return PythonObject(None)
 
-def _load_gpt4(path: PythonObject) raises -> PythonObject:
-    return PythonObject(alloc=GPT4TK.load(String(path)))
-
 def _reg_special_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
     var tokens = _py_dict_to_mojo(args[0])
+    ptr[].register_special_tokens(tokens^)
+    return PythonObject(None)
+
+def _get_specials_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    _ = args
+    var ptr = self.downcast_value_ptr[GPT4TK]()
+    var result = Python.evaluate("{}")
+    for item in ptr[].special_bytes.items():
+        result[PythonObject(item.key)] = Python.int(item.value)
+    return result
+
+def _set_specials_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPT4TK]()
+    var tokens = _py_dict_to_mojo(args[0])
+    ptr[].special_bytes = Dict[String, Int]()
+    ptr[].inverse_special = Dict[Int, String]()
     ptr[].register_special_tokens(tokens^)
     return PythonObject(None)
 
@@ -427,10 +454,6 @@ def _decode_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> Pyth
 def _n_vocab_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args; return PythonObject(len(self.downcast_value_ptr[GPT4oTK]()[]))
 
-def _save_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    self.downcast_value_ptr[GPT4oTK]()[].save(String(args[0]))
-    return PythonObject(None)
-
 def _save_tiktok_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     self.downcast_value_ptr[GPT4oTK]()[].save_tiktoken(String(args[0]))
     return PythonObject(None)
@@ -439,12 +462,25 @@ def _load_tiktok_gpt4o(mut self: PythonObject, mut args: PythonObject) raises ->
     self.downcast_value_ptr[GPT4oTK]()[].load_tiktoken(String(args[0]))
     return PythonObject(None)
 
-def _load_gpt4o(path: PythonObject) raises -> PythonObject:
-    return PythonObject(alloc=GPT4oTK.load(String(path)))
-
 def _reg_special_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
     var tokens = _py_dict_to_mojo(args[0])
+    ptr[].register_special_tokens(tokens^)
+    return PythonObject(None)
+
+def _get_specials_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    _ = args
+    var ptr = self.downcast_value_ptr[GPT4oTK]()
+    var result = Python.evaluate("{}")
+    for item in ptr[].special_bytes.items():
+        result[PythonObject(item.key)] = Python.int(item.value)
+    return result
+
+def _set_specials_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPT4oTK]()
+    var tokens = _py_dict_to_mojo(args[0])
+    ptr[].special_bytes = Dict[String, Int]()
+    ptr[].inverse_special = Dict[Int, String]()
     ptr[].register_special_tokens(tokens^)
     return PythonObject(None)
 
@@ -510,7 +546,7 @@ def py_train_gpre(texts: PythonObject, vocab_size: PythonObject) raises -> Pytho
 
 # ── Module entry point ───────────────────────────────────────────
 
-@export
+@export("PyInit__mbpe")
 def PyInit_mbpe() abi("C") -> PythonObject:
     try:
         var mb = PythonModuleBuilder("mbpe")
@@ -522,17 +558,17 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_encode_ordinary_gpre]("encode_ordinary") \
             .def_py_method[_decode_gpre]("decode") \
             .def_py_method[_n_vocab_gpre]("n_vocab") \
-            .def_py_method[_save_gpre]("save") \
             .def_py_method[_save_tiktok_gpre]("save_tiktoken") \
             .def_py_method[_load_tiktok_gpre]("load_tiktoken") \
             .def_py_method[_reg_special_gpre]("register_special_tokens") \
+            .def_py_method[_get_specials_gpre]("_get_special_bytes") \
+            .def_py_method[_set_specials_gpre]("_set_special_bytes") \
             .def_py_method[_name_gpre]("name") \
             .def_py_method[_decode_bytes_gpre]("decode_bytes") \
             .def_py_method[_encode_single_token_gpre]("encode_single_token") \
             .def_py_method[_token_byte_values_gpre]("token_byte_values") \
             .def_py_method[_decode_single_token_bytes_gpre]("decode_single_token_bytes") \
-            .def_py_method[_decode_with_offsets_gpre]("decode_with_offsets") \
-            .def_staticmethod[_load_gpre]("load")
+            .def_py_method[_decode_with_offsets_gpre]("decode_with_offsets")
 
         _ = mb.add_type[GPT2TK]("GPT2Tokenizer") \
             .def_py_init[_init_gpt2]() \
@@ -541,17 +577,17 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_encode_ordinary_gpt2]("encode_ordinary") \
             .def_py_method[_decode_gpt2]("decode") \
             .def_py_method[_n_vocab_gpt2]("n_vocab") \
-            .def_py_method[_save_gpt2]("save") \
             .def_py_method[_save_tiktok_gpt2]("save_tiktoken") \
             .def_py_method[_load_tiktok_gpt2]("load_tiktoken") \
             .def_py_method[_reg_special_gpt2]("register_special_tokens") \
+            .def_py_method[_get_specials_gpt2]("_get_special_bytes") \
+            .def_py_method[_set_specials_gpt2]("_set_special_bytes") \
             .def_py_method[_name_gpt2]("name") \
             .def_py_method[_decode_bytes_gpt2]("decode_bytes") \
             .def_py_method[_encode_single_token_gpt2]("encode_single_token") \
             .def_py_method[_token_byte_values_gpt2]("token_byte_values") \
             .def_py_method[_decode_single_token_bytes_gpt2]("decode_single_token_bytes") \
-            .def_py_method[_decode_with_offsets_gpt2]("decode_with_offsets") \
-            .def_staticmethod[_load_gpt2]("load")
+            .def_py_method[_decode_with_offsets_gpt2]("decode_with_offsets")
 
         _ = mb.add_type[GPT4TK]("GPT4Tokenizer") \
             .def_py_init[_init_gpt4]() \
@@ -560,17 +596,17 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_encode_ordinary_gpt4]("encode_ordinary") \
             .def_py_method[_decode_gpt4]("decode") \
             .def_py_method[_n_vocab_gpt4]("n_vocab") \
-            .def_py_method[_save_gpt4]("save") \
             .def_py_method[_save_tiktok_gpt4]("save_tiktoken") \
             .def_py_method[_load_tiktok_gpt4]("load_tiktoken") \
             .def_py_method[_reg_special_gpt4]("register_special_tokens") \
+            .def_py_method[_get_specials_gpt4]("_get_special_bytes") \
+            .def_py_method[_set_specials_gpt4]("_set_special_bytes") \
             .def_py_method[_name_gpt4]("name") \
             .def_py_method[_decode_bytes_gpt4]("decode_bytes") \
             .def_py_method[_encode_single_token_gpt4]("encode_single_token") \
             .def_py_method[_token_byte_values_gpt4]("token_byte_values") \
             .def_py_method[_decode_single_token_bytes_gpt4]("decode_single_token_bytes") \
-            .def_py_method[_decode_with_offsets_gpt4]("decode_with_offsets") \
-            .def_staticmethod[_load_gpt4]("load")
+            .def_py_method[_decode_with_offsets_gpt4]("decode_with_offsets")
 
         _ = mb.add_type[GPT4oTK]("GPT4oTokenizer") \
             .def_py_init[_init_gpt4o]() \
@@ -579,17 +615,17 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_encode_ordinary_gpt4o]("encode_ordinary") \
             .def_py_method[_decode_gpt4o]("decode") \
             .def_py_method[_n_vocab_gpt4o]("n_vocab") \
-            .def_py_method[_save_gpt4o]("save") \
             .def_py_method[_save_tiktok_gpt4o]("save_tiktoken") \
             .def_py_method[_load_tiktok_gpt4o]("load_tiktoken") \
             .def_py_method[_reg_special_gpt4o]("register_special_tokens") \
+            .def_py_method[_get_specials_gpt4o]("_get_special_bytes") \
+            .def_py_method[_set_specials_gpt4o]("_set_special_bytes") \
             .def_py_method[_name_gpt4o]("name") \
             .def_py_method[_decode_bytes_gpt4o]("decode_bytes") \
             .def_py_method[_encode_single_token_gpt4o]("encode_single_token") \
             .def_py_method[_token_byte_values_gpt4o]("token_byte_values") \
             .def_py_method[_decode_single_token_bytes_gpt4o]("decode_single_token_bytes") \
-            .def_py_method[_decode_with_offsets_gpt4o]("decode_with_offsets") \
-            .def_staticmethod[_load_gpt4o]("load")
+            .def_py_method[_decode_with_offsets_gpt4o]("decode_with_offsets")
 
         mb.def_function[py_get_encoding]("get_encoding")
         mb.def_function[py_train]("_train_impl")

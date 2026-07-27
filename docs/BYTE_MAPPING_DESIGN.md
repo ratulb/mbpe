@@ -4,10 +4,10 @@
 
 Currently, `BPETokenizer` hardcodes the GPT-2 byte→ID mapping everywhere:
 
-- **Encode hot path** (`_tokenize` line 468): `dst[i] = Int(ptr[i])` — assumes rank = byte value
-- **Train** (`train` line 320): `ids.append(Int(sb[i]))` — same assumption
-- **Load .tiktoken** (`load_tiktoken` line 794): `chr(self.byte_to_cp[Int(raw_bytes[i])])` — always uses GPT-2's `byte_to_cp`
-- **Save .tiktoken** (`save_tiktoken` line 756): `self.cp_to_byte[Int(cp)]` — same
+- **Encode hot path** (`_tokenize`): `dst[i] = Int(ptr[i])` — originally assumed rank = byte value; now uses `Self.PT.byte_to_id()` with comptime branch
+- **Train** (`train`): `ids.append(Int(sb[i]))` — now uses `Self.PT.byte_to_id()` with comptime branch
+- **Load .tiktoken** (`load_tiktoken`): `chr(self.byte_to_cp[Int(raw_bytes[i])])` — uses universal GPT-2 `byte_to_cp` (no rank mapping needed)
+- **Save .tiktoken** (`save_tiktoken`): `self.cp_to_byte[Int(cp)]` — same
 
 This works for r50k_base and cl100k_base (where rank 0 = byte 0x00), but breaks for
 **o200k_base** (GPT-4o), where rank 0 = byte 0x21 (`!`), rank 220 = byte 0x20 (space), etc.

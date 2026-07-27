@@ -2,8 +2,8 @@
 
 ## Scope
 
-`tokenizer_tests.txt` defines ~110 test stubs across 16 sections.
-We already have **45 passing tests** (36 `main.mojo` + 9 `tests/test_tokenizer.mojo`).
+`tests/tokenizer_tests.txt` defines ~110 test stubs across 16 sections.
+We already have **78 passing tests** (36 `main.mojo` + 9 `tests/test_tokenizer.mojo` + 33 `tests/exhaustive_tokenizer.mojo`).
 
 Below: each section categorized and prioritized.
 

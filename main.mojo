@@ -1,5 +1,5 @@
-from tokenizer import BPETokenizer
-from pretokenizer import GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
+from bpe.tokenizer import BPETokenizer
+from bpe.pretokenizer import GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, TestSuite
 from std.base64 import b64decode
@@ -141,22 +141,6 @@ def test_empty_input() raises:
     assert_equal(tok.decode(List[Int]()), "")
 
 
-def test_save_load() raises:
-    var corpus = List[String]()
-    corpus.append(String("hello world"))
-    var tok = BPETokenizer()
-    tok.train(corpus, 300)
-
-    tok.save("/tmp/bpe_test.json")
-    var loaded = BPETokenizer.load("/tmp/bpe_test.json")
-
-    assert_equal(len(loaded), len(tok))
-    assert_equal(
-        loaded.decode(loaded.encode(String("hello world"))),
-        "hello world",
-    )
-
-
 def test_deterministic() raises:
     var corpus = List[String]()
     corpus.append(String("hello world"))
@@ -187,8 +171,9 @@ def test_full_hf_corpus() raises:
         "This is not a token.",
     )
 
-    tok.save("/tmp/bpe_hf_test.json")
-    var loaded = BPETokenizer.load("/tmp/bpe_hf_test.json")
+    tok.save_tiktoken("/tmp/bpe_hf_test.tiktoken")
+    var loaded = BPETokenizer()
+    loaded.load_tiktoken("/tmp/bpe_hf_test.tiktoken")
     assert_equal(len(loaded), len(tok))
     assert_equal(
         loaded.decode(loaded.encode(String("This is not a token."))),
@@ -351,29 +336,21 @@ def test_tiktoken_idempotent_save() raises:
     assert_equal(l2.decode(final_ids), test_input)
 
 
-def test_tiktoken_vs_json_parity() raises:
-    """JSON save/load and .tiktoken save/load from the same trained
-       tokenizer produce identical encode results."""
+def test_tiktoken_save_load_roundtrip() raises:
+    """.tiktoken save/load roundtrip preserves encode/decode."""
     var corpus = List[String]()
     corpus.append(String("hello world"))
     var tok = BPETokenizer()
     tok.train(corpus, 300)
     var test_input = String("hello world")
 
-    tok.save("/tmp/bpe_json_parity.json")
-    tok.save_tiktoken("/tmp/bpe_tk_parity.tiktoken")
+    tok.save_tiktoken("/tmp/bpe_tk_rt.tiktoken")
+    var loaded = BPETokenizer()
+    loaded.load_tiktoken("/tmp/bpe_tk_rt.tiktoken")
 
-    var from_json = BPETokenizer.load("/tmp/bpe_json_parity.json")
-    var from_tiktoken = BPETokenizer()
-    from_tiktoken.load_tiktoken("/tmp/bpe_tk_parity.tiktoken")
-
-    assert_equal(len(from_json), len(from_tiktoken))
-    var json_ids = from_json.encode(test_input)
-    var tk_ids = from_tiktoken.encode(test_input)
-    assert_equal(len(json_ids), len(tk_ids))
-    for i in range(len(json_ids)):
-        assert_equal(json_ids[i], tk_ids[i])
-    assert_equal(from_json.decode(tk_ids), test_input)
+    assert_equal(len(loaded), len(tok))
+    var tk_ids = loaded.encode(test_input)
+    assert_equal(loaded.decode(tk_ids), test_input)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -750,7 +727,7 @@ def test_special_tokens_no_specials_registered() raises:
 
 
 def test_special_tokens_save_load() raises:
-    """Save and load preserves special tokens."""
+    """Special tokens survive tiktoken save/load when re-registered after load."""
     var tok = BPETokenizer[GPreTokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
@@ -760,13 +737,15 @@ def test_special_tokens_save_load() raises:
     specials["<|endoftext|>"] = 300
     tok.register_special_tokens(specials)
 
-    var path = "/tmp/bpe_special_save_load.json"
-    tok.save(path)
-    var loaded = BPETokenizer.load(path)
+    var path = "/tmp/bpe_special_save_load.tiktoken"
+    tok.save_tiktoken(path)
+    var loaded = BPETokenizer()
+    loaded.load_tiktoken(path)
 
-    assert_equal(len(loaded.special_bytes), 1)
+    # tiktoken format does not persist special tokens; re-register after load
+    assert_equal(len(loaded.special_bytes), 0)
+    loaded.register_special_tokens(specials)
     assert_equal(loaded.special_bytes["<|endoftext|>"], 300)
-    assert_equal(loaded.vocab[300], "<|endoftext|>")
 
 
 def test_special_tokens_tiktoken_skip() raises:

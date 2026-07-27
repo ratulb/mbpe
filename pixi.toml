@@ -19,5 +19,9 @@ gcc = ">=15.2.0,<15.3"
 [feature.dev.pypi-dependencies]
 tiktoken = "*"
 
+[feature.dev.dependencies]
+pytest = ">=9.1.1,<10"
+pytest-cov = ">=7.1.0,<8"
+
 [environments]
 dev = { features = ["dev"], solve-group = "default" }

@@ -25,6 +25,8 @@ benchmarks/results/
 # Python cache
 __pycache__/
 *.pyc
+.coverage
+.pytest_cache/
 
 # generated reference data (regenerate via `pixi run gen-refs`)
 benchmarks/ref_splits.json
@@ -33,3 +35,7 @@ benchmarks/ref_counts.json
 # ad-hoc verification scripts
 lb_*.mojo
 benchmarks/verify_levelb.*
+
+# built shared libraries
+python-binding/*.so
+*.so

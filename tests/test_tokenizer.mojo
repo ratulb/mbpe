@@ -1,6 +1,6 @@
 """BPETokenizer test suite.  Run with: mojo -I . tests/test_tokenizer.mojo."""
 
-from tokenizer import BPETokenizer
+from bpe.tokenizer import BPETokenizer
 from std.testing import assert_equal, assert_true, TestSuite
 
 
@@ -53,26 +53,6 @@ def test_empty_input() raises:
     assert_equal(tok.decode(List[Int]()), "")
 
 
-def test_save_load() raises:
-    """Train, save to a JSON file, load into a fresh tokenizer, and verify
-    the restored tokenizer produces identical encode/decode results.
-    This validates the serialisation round-trip (merges, vocab, mappings).
-    """
-    var corpus = List[String]()
-    corpus.append(String("hello world"))
-    var tok = BPETokenizer()
-    tok.train(corpus, 300)
-
-    tok.save("/tmp/bpe_test.json")
-    var loaded = BPETokenizer.load("/tmp/bpe_test.json")
-
-    assert_equal(len(loaded), len(tok))
-    assert_equal(
-        loaded.decode(loaded.encode(String("hello world"))),
-        "hello world",
-    )
-
-
 def test_deterministic() raises:
     """Verify that training twice on the same corpus yields the same
     number of merge rules.  If the algorithm is deterministic the two
@@ -92,7 +72,7 @@ def test_deterministic() raises:
 def test_full_hf_corpus() raises:
     """Train on a realistic multi-sentence corpus (Hugging Face Course
     excerpts) and verify encode→decode roundtrip on an unseen phrase.
-    Also verifies save/load consistency on a more complex tokenizer.
+    Also verifies .tiktoken save/load consistency.
     """
     var corpus = List[String]()
     corpus.append(String("This is the Hugging Face Course."))
@@ -111,8 +91,9 @@ def test_full_hf_corpus() raises:
         "This is not a token.",
     )
 
-    tok.save("/tmp/bpe_hf_test.json")
-    var loaded = BPETokenizer.load("/tmp/bpe_hf_test.json")
+    tok.save_tiktoken("/tmp/bpe_hf_test.tiktoken")
+    var loaded = BPETokenizer()
+    loaded.load_tiktoken("/tmp/bpe_hf_test.tiktoken")
     assert_equal(len(loaded), len(tok))
     assert_equal(
         loaded.decode(loaded.encode(String("This is not a token."))),

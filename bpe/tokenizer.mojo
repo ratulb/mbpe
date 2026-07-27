@@ -33,14 +33,13 @@ References
 """
 
 from std.pathlib import Path
-from std.python import Python
 from std.memory import alloc, memcpy
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 from std.base64 import b64encode, b64decode
 from std.format import Writable, Writer
 
-from pretokenizer import PreTokenizer, GPreTokenizer, ByteMapping
+from bpe.pretokenizer import PreTokenizer, GPreTokenizer, ByteMapping
 
 
 # ---------------------------------------------------------------------------
@@ -741,117 +740,12 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable & Writable
         writer.write(String("BPETokenizer(vocab_size=") + String(len(self.vocab)) + String(")"))
 
     # ── serialization ────────────────────────────────────────────────────
-    # We serialize through Python's json module for simplicity.  The format:
+    # We use the standard .tiktoken format (OpenAI-compatible):
+    #   <base64(token_bytes)> <rank>\n
     #
-    #   {
-    #     "vocab": ["\x00", "!", "\"", ...],      # display strings
-    #     "merges": [[1, 5, 256], ...],            # (a_id, b_id, merged_id)
-    #     "byte_to_cp": [0, 256, 257, ...]         # 256-element lookup
-    #   }
-    #
-    # cp_to_byte is not stored explicitly — it's reconstructed from
-    # byte_to_cp on load (since it's the inverse mapping).
-    #
-    # Breaking change: old save files (character-level vocab) are not
-    # compatible with this format.
+    # See save_tiktoken() / load_tiktoken() below.
+    # The legacy JSON-based save()/load() has been removed.
     # ─────────────────────────────────────────────────────────────────────
-
-    def save(self, path: String) raises:
-        var json = Python.import_module("json")
-        var data = Python.dict()
-
-        var py_vocab = Python.list()
-        for token in self.vocab:
-            py_vocab.append(Python.str(token))
-        data["vocab"] = py_vocab
-
-        var py_merges = Python.list()
-        for merge in self.merges:
-            var entry = Python.list()
-            entry.append(Python.int(merge.first))
-            entry.append(Python.int(merge.second))
-            entry.append(Python.int(merge.merged))
-            py_merges.append(entry)
-        data["merges"] = py_merges
-
-        var py_special = Python.list()
-        for item in self.special_bytes.items():
-            var entry = Python.list()
-            entry.append(Python.str(item.key))
-            entry.append(Python.int(item.value))
-            py_special.append(entry)
-        data["special_tokens"] = py_special
-
-        var py_byte_to_cp = Python.list()
-        for b in range(256):
-            py_byte_to_cp.append(Python.int(self.byte_to_cp[b]))
-        data["byte_to_cp"] = py_byte_to_cp
-
-        Path(path).write_text(String(json.dumps(data)))
-
-    @staticmethod
-    def load(path: String) raises -> Self:
-        var json = Python.import_module("json")
-        var data = json.loads(Path(path).read_text())
-
-        var tok = Self()
-
-        # Reconstruct byte ↔ safe-codepoint mappings from the stored array.
-        var py_byte_to_cp = data["byte_to_cp"]
-        tok.byte_to_cp = Dict[Int, Int]()
-        tok.cp_to_byte = Dict[Int, Int]()
-        for b in range(256):
-            var cp = Int(py=py_byte_to_cp[b])
-            tok.byte_to_cp[b] = cp
-            tok.cp_to_byte[cp] = b
-
-        # Rebuild vocab (stoi is not needed — encoding uses byte arithmetic
-        # and the merge list).
-        var py_vocab = data["vocab"]
-        tok.vocab = List[String](capacity=len(py_vocab))
-        tok.token_bytes = List[UInt8]()
-        tok.token_offsets = List[Int](capacity=len(py_vocab) + 1)
-        tok.token_lengths = List[Int](capacity=len(py_vocab))
-        for i in range(len(py_vocab)):
-            var display = String(py_vocab[i])
-            tok.vocab.append(display)
-            tok.token_offsets.append(len(tok.token_bytes))
-            var pending: Int = -1
-            for cp in display.codepoints():
-                var b = tok.cp_to_byte[Int(cp)]
-                if b == 0xA0 and pending == 0xC4:
-                    tok.token_bytes.append(UInt8(0x20))
-                    pending = -1
-                else:
-                    if pending >= 0:
-                        tok.token_bytes.append(UInt8(pending))
-                    pending = b
-            if pending >= 0:
-                tok.token_bytes.append(UInt8(pending))
-            tok.token_lengths.append(len(tok.token_bytes) - tok.token_offsets[i])
-        tok.token_offsets.append(len(tok.token_bytes))
-
-        # Rebuild ordered merge list.
-        var py_merges = data["merges"]
-        for i in range(len(py_merges)):
-            var entry = py_merges[i]
-            var a_id = Int(py=entry[0])
-            var b_id = Int(py=entry[1])
-            var merged_id = Int(py=entry[2])
-            tok.merges.append(MergeRule(a_id, b_id, merged_id))
-            tok.merge_cache.set(a_id, b_id, merged_id)
-
-        try:
-            var py_special = data["special_tokens"]
-            if len(py_special) > 0:
-                for i in range(len(py_special)):
-                    var text = String(py_special[i][0])
-                    var id = Int(py=py_special[i][1])
-                    tok._register_special_token(text, id)
-        except:
-            pass
-
-        return tok^
 
     # ── .tiktoken format support ──────────────────────────────────────
 
@@ -1098,8 +992,3 @@ def merge_inplace(
             i += 1
         w += 1
     return w
-
-
-
-
-

@@ -116,9 +116,9 @@ alias _train_gpt2 = _train_impl[BPETokenizer[GPT2Pretokenizer]]
 
 ### File layout
 
-Single file: `mbpe.mojo` contains everything — type aliases, parameterized
-wrappers, concrete `alias` instantiations, init/load functions, and the
-`PyInit_mbpe` entry point.
+Single file: `python-binding/mbpe.mojo` contains everything — type aliases,
+parameterized wrappers, concrete `alias` instantiations, init/load functions,
+and the `PyInit_mbpe` entry point.
 
 ### Module entry point
 
@@ -145,8 +145,9 @@ def PyInit_mbpe() abi("C") -> PythonObject:
 | `enc.encode(text)` | `enc.encode(text)` | Same |
 | `enc.encode_ordinary(text)` | `enc.encode_ordinary(text)` | Same |
 | `enc.decode(tokens)` | `enc.decode(tokens)` | Same |
-| `enc.decode_bytes(tokens)` | `enc.decode_bytes(tokens)` | Future |
-| `enc.n_vocab` | `enc.n_vocab()` | Different (method vs property) |
+| `enc.decode_bytes(tokens)` | `enc.decode_bytes(tokens)` | ✅ Done |
+| `enc.n_vocab` | `enc.n_vocab()` | Method (not property, Mojo limitation) |
+| `enc.encode_single_token(text)` | `enc.encode_single_token(text)` | ✅ Done |
 | `enc.name` | `enc.name` | Same |
 | `enc.special_tokens_set` | `enc.special_tokens_set` | Future |
 | `enc.register_special_tokens(...)` | `enc.register_special_tokens(...)` | New |
@@ -160,29 +161,29 @@ mbpe adds training APIs that tiktoken does not expose.
 
 ## Implementation Phases
 
-### Phase 1 — Minimal v0 (done)
+### Phase 1 — Minimal v0 ✅ (done)
 
-- Single file: `mbpe.mojo`
+- Single file: `python-binding/mbpe.mojo`
 - Parameterized wrapper-functions with `alias` instantiations
 - Bind all 4 tokenizer types: GPreTokenizer, GPT2Tokenizer, GPT4Tokenizer, GPT4oTokenizer
-- Expose: `__init__`, `train`, `encode`, `encode_ordinary`, `decode`, `n_vocab`, `save`, `load`
-- Module-level: `get_encoding(name)` factory (creates empty tokenizer — no bundled files yet)
-- Build: `mojo build mbpe.mojo --emit shared-lib -o mbpe.so`
+- Expose: `__init__`, `train`, `encode`, `encode_ordinary`, `decode`, `n_vocab`, `name`, `save`, `load`
+- Module-level: `get_encoding(name)` factory (loads from bundled `.tiktoken` files in `data/`)
+- Build: `mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe.so`
 
-### Phase 2 — Bundled encodings + training factory
+### Phase 2 — Bundled encodings + training factory ✅ (done)
 
-- Bundle `.tiktoken` files for gpt2 / cl100k / o200k
+- `.tiktoken` files for gpt2 / cl100k / o200k in `data/`
 - `get_encoding()` loads from bundled files
 - Module-level `train(texts, vocab_size, pretokenizer=...)` factory
 - `register_special_tokens`, `save_tiktoken`, `load_tiktoken`
 
-### Phase 3 — tiktoken API parity
+### Phase 3 — tiktoken API parity ✅ (done)
 
 - `decode_bytes`, `decode_single_token_bytes`, `token_byte_values`
 - `encode_single_token`
 - `name` property
 - `decode_with_offsets`
-- Batch methods (`encode_batch`, `decode_batch`)
+- ❌ Batch methods (`encode_batch`, `decode_batch`) — not implemented
 
 ---
 
@@ -190,10 +191,10 @@ mbpe adds training APIs that tiktoken does not expose.
 
 ```bash
 # Build extension module
-mojo build mbpe.mojo --emit shared-lib -o mbpe.so
+mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe.so
 
 # Use from Python
-export PYTHONPATH=.
+export PYTHONPATH=python-binding
 python -c "import mbpe; enc = mbpe.get_encoding('gpt2')"
 ```
 
