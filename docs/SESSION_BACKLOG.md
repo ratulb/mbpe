@@ -6,7 +6,25 @@ Items to tackle in a future session, in rough priority order.
 
 1. **Training benchmark for mbpe_py** — Add train() timing to `benchmark_mbpe_quick.py` to measure FFI overhead during training (per-element corpus string conversion).
 
-2. **Cross-platform wheels** — Build macOS + Windows wheels via cibuildwheel or manual CI matrix (currently linux x86_64 only; others fall back to the broken `any` wheel).
+2. **Cross-platform wheels** — Build macOS + Windows wheels (currently linux x86_64 only; others fall back to the broken `any` wheel).
+
+   **Per-platform CI matrix:**
+   ```yaml
+   strategy:
+     matrix:
+       os: [ubuntu-latest, macos-latest, macos-13]
+   ```
+   Each runner: `pixi install` → `mojo build` → `python -m build --wheel`.
+
+   **macOS** uses `delocate` instead of `auditwheel`:
+   ```bash
+   pip install delocate
+   delocate-wheel -w dist/ dist/*.whl
+   ```
+
+   **Windows** is blocked — Mojo doesn't support it yet.
+
+   **Cost:** macOS runners add ~5–8 min per publish. `mojo` availability on macOS runners needs verification.
 
 ## Medium Value
 
