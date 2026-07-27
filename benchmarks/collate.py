@@ -247,11 +247,8 @@ VARIANT_LABELS = {
 
 def make_comparison_table(mbpe_py, py_tiktoken, rs_tiktoken, mojo, n_bytes):
     lines = []
-    lines.append("### Encode/Decode Throughput — Fair Comparison")
+    lines.append("### Encode/Decode Throughput — 1.0 MB corpus")
     lines.append("")
-    mb = n_bytes / 1_048_576 if n_bytes > 0 else 0
-    corpus_size = f"{mb:.1f} MB" if mb >= 1 else f"{n_bytes // 1024} KB"
-    lines.append(f"*{corpus_size} corpus. tiktoken and mbpe Python bindings use pre-built vocabularies (50K+ merges). Native Mojo uses a self-trained vocabulary (4K merges) — not directly comparable.*")
     lines.append("")
 
     header = (
