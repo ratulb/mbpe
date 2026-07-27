@@ -55,9 +55,12 @@ def _uint8_list_list_to_py_list(data: List[List[UInt8]]) raises -> PythonObject:
 
 
 def _py_ids_to_mojo(py_ids: PythonObject) raises -> List[Int]:
-    var ids = List[Int](capacity=len(py_ids))
-    for i in range(len(py_ids)):
-        ids.append(Int(py=py_ids[i]))
+    var n = len(py_ids)
+    ref cpy = Python().cpython()
+    var list_ptr = py_ids.steal_data()
+    var ids = List[Int](capacity=n)
+    for i in range(n):
+        ids.append(Int(cpy.PyLong_AsSsize_t(cpy.PyList_GetItem(list_ptr, i))))
     return ids^
 
 
@@ -220,8 +223,13 @@ def _encode_ordinary_gpre(mut self: PythonObject, mut args: PythonObject) raises
 
 def _decode_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPreTK]()
-    var py_ids = args[0]; var ids = List[Int](capacity=len(py_ids))
-    for i in range(len(py_ids)): ids.append(Int(py=py_ids[i]))
+    var py_ids = args[0]
+    var n = len(py_ids)
+    ref cpy = Python().cpython()
+    var list_ptr = py_ids.steal_data()
+    var ids = List[Int](capacity=n)
+    for i in range(n):
+        ids.append(Int(cpy.PyLong_AsSsize_t(cpy.PyList_GetItem(list_ptr, i))))
     return PythonObject(ptr[].decode(Span[Int](ids)))
 
 def _n_vocab_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -275,8 +283,13 @@ def _encode_ordinary_gpt2(mut self: PythonObject, mut args: PythonObject) raises
 
 def _decode_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
-    var py_ids = args[0]; var ids = List[Int](capacity=len(py_ids))
-    for i in range(len(py_ids)): ids.append(Int(py=py_ids[i]))
+    var py_ids = args[0]
+    var n = len(py_ids)
+    ref cpy = Python().cpython()
+    var list_ptr = py_ids.steal_data()
+    var ids = List[Int](capacity=n)
+    for i in range(n):
+        ids.append(Int(cpy.PyLong_AsSsize_t(cpy.PyList_GetItem(list_ptr, i))))
     return PythonObject(ptr[].decode(Span[Int](ids)))
 
 def _n_vocab_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -330,8 +343,13 @@ def _encode_ordinary_gpt4(mut self: PythonObject, mut args: PythonObject) raises
 
 def _decode_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
-    var py_ids = args[0]; var ids = List[Int](capacity=len(py_ids))
-    for i in range(len(py_ids)): ids.append(Int(py=py_ids[i]))
+    var py_ids = args[0]
+    var n = len(py_ids)
+    ref cpy = Python().cpython()
+    var list_ptr = py_ids.steal_data()
+    var ids = List[Int](capacity=n)
+    for i in range(n):
+        ids.append(Int(cpy.PyLong_AsSsize_t(cpy.PyList_GetItem(list_ptr, i))))
     return PythonObject(ptr[].decode(Span[Int](ids)))
 
 def _n_vocab_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -385,8 +403,13 @@ def _encode_ordinary_gpt4o(mut self: PythonObject, mut args: PythonObject) raise
 
 def _decode_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
-    var py_ids = args[0]; var ids = List[Int](capacity=len(py_ids))
-    for i in range(len(py_ids)): ids.append(Int(py=py_ids[i]))
+    var py_ids = args[0]
+    var n = len(py_ids)
+    ref cpy = Python().cpython()
+    var list_ptr = py_ids.steal_data()
+    var ids = List[Int](capacity=n)
+    for i in range(n):
+        ids.append(Int(cpy.PyLong_AsSsize_t(cpy.PyList_GetItem(list_ptr, i))))
     return PythonObject(ptr[].decode(Span[Int](ids)))
 
 def _n_vocab_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
