@@ -157,24 +157,24 @@ Module-level functions:
 
 ## Benchmarks
 
-1 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
+5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
 
 | Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|---|
-| **gpt2** | Mojo native | 309K | **5.5** | **82.5** |
-| | mbpe (Python) | 309K | 3.8 | 49.3 |
-| | tiktoken (Python) | 309K | 2.5 | 29.4 |
-| | tiktoken-rs | 306K | 2.6 | 56.8 |
-| **cl100k** | Mojo native | 256K | **4.9** | **73.4** |
-| | mbpe (Python) | 256K | 3.5 | 45.0 |
-| | tiktoken (Python) | 256K | 2.1 | 30.7 |
-| | tiktoken-rs | 256K | 2.5 | 53.5 |
-| **o200k** | Mojo native | 256K | **4.4** | **72.5** |
-| | mbpe (Python) | 256K | 3.1 | 42.6 |
-| | tiktoken (Python) | 256K | 3.8 | 25.5 |
-| | tiktoken-rs | 256K | 4.2 | 48.0 |
+| **gpt2** | Mojo native | 1.54M | **5.8** | **78.7** |
+| | mbpe (Python) | 1.54M | 4.3 | 48.5 |
+| | tiktoken (Python) | 1.54M | 2.9 | 28.7 |
+| | tiktoken-rs | 1.53M | 2.6 | 55.4 |
+| **cl100k** | Mojo native | 1.28M | **4.8** | **70.6** |
+| | mbpe (Python) | 1.28M | 3.6 | 44.9 |
+| | tiktoken (Python) | 1.28M | 2.5 | 30.7 |
+| | tiktoken-rs | 1.28M | 2.5 | 50.8 |
+| **o200k** | Mojo native | 1.28M | **4.3** | **68.7** |
+| | mbpe (Python) | 1.28M | 3.2 | 42.7 |
+| | tiktoken (Python) | 1.28M | 3.9 | 29.4 |
+| | tiktoken-rs | 1.28M | 4.1 | 47.8 |
 
-**Training throughput** (Mojo, self-trained, GPT2 pre-tokenizer):
+**Training throughput** (Mojo, self-trained, GPT2 pre-tokenizer, 1 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
