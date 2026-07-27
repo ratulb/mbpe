@@ -17,7 +17,7 @@ print(decoded)
 ## Why mbpe?
 
 - **Drop-in replacement for `tiktoken`** — same `get_encoding()`, same `encode()` with `allowed_special`/`disallowed_special`, same `.tiktoken` format
-- **Faster** — Mojo native beats `tiktoken` (OpenAI's Rust implementation), and `mbpe` Python bindings are ~2× faster than `tiktoken` Python
+- **Faster** — Mojo native beats `tiktoken-rs` (Rust), and `mbpe` Python bindings beat `tiktoken` Python
 - **Train your own tokenizer** — `tokenizer.train(["hello world"], vocab_size=300)` from scratch, save to `.tiktoken` format
 - **Plug-in your own pre-tokenizer** — Mojo trait-based pre-tokenizers. Ships with pre-tokenizers for r50k_base, cl100k_base and o200k encodings
 - **Byte-level** — All 256 bytes as base vocabulary, no UNK token, lossless for any UTF-8 input
