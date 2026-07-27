@@ -225,12 +225,12 @@ def _train_gpre(mut self: PythonObject, mut args: PythonObject, mut kwargs: Pyth
 
 def _encode_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPreTK]()
-    var text = String(args[0]); var ids = ptr[].encode(text)
+    var ids = ptr[].encode(Python().as_string_slice(args[0]))
     return _list_of_int_to_py(ids)
 
 def _encode_ordinary_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPreTK]()
-    var text = String(args[0]); var ids = ptr[].encode_ordinary(text)
+    var ids = ptr[].encode_ordinary(Python().as_string_slice(args[0]))
     return _list_of_int_to_py(ids)
 
 def _decode_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -287,11 +287,11 @@ def _train_gpt2(mut self: PythonObject, mut args: PythonObject, mut kwargs: Pyth
 
 def _encode_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
-    return _list_of_int_to_py(ptr[].encode(String(args[0])))
+    return _list_of_int_to_py(ptr[].encode(Python().as_string_slice(args[0])))
 
 def _encode_ordinary_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
-    return _list_of_int_to_py(ptr[].encode_ordinary(String(args[0])))
+    return _list_of_int_to_py(ptr[].encode_ordinary(Python().as_string_slice(args[0])))
 
 def _decode_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
@@ -347,11 +347,11 @@ def _train_gpt4(mut self: PythonObject, mut args: PythonObject, mut kwargs: Pyth
 
 def _encode_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
-    return _list_of_int_to_py(ptr[].encode(String(args[0])))
+    return _list_of_int_to_py(ptr[].encode(Python().as_string_slice(args[0])))
 
 def _encode_ordinary_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
-    return _list_of_int_to_py(ptr[].encode_ordinary(String(args[0])))
+    return _list_of_int_to_py(ptr[].encode_ordinary(Python().as_string_slice(args[0])))
 
 def _decode_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
@@ -407,11 +407,11 @@ def _train_gpt4o(mut self: PythonObject, mut args: PythonObject, mut kwargs: Pyt
 
 def _encode_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
-    return _list_of_int_to_py(ptr[].encode(String(args[0])))
+    return _list_of_int_to_py(ptr[].encode(Python().as_string_slice(args[0])))
 
 def _encode_ordinary_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
-    return _list_of_int_to_py(ptr[].encode_ordinary(String(args[0])))
+    return _list_of_int_to_py(ptr[].encode_ordinary(Python().as_string_slice(args[0])))
 
 def _decode_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
