@@ -24,6 +24,7 @@ All via `pixi run` or inside `pixi shell`:
   - Then: `PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPreTokenizer()"`
 - **Python tests**: `pixi run python-tests` → `python -m pytest tests/python/ -v --tb=short`
 - **Python coverage**: `pixi run python-cov` → `python -m pytest tests/python/ --cov=mbpe --cov-report=term-missing`
+- **Quick Python benchmark** (~2s, no file deps): `pixi run python benchmarks/smoke_bench.py` or `PYTHONPATH=python-binding python benchmarks/smoke_bench.py`
   - API: 4 classes (`GPreTokenizer`, `GPT2Tokenizer`, `GPT4Tokenizer`, `GPT4oTokenizer`) each with `train`, `encode`, `encode_ordinary`, `decode`, `decode_bytes`, `decode_single_token_bytes`, `decode_with_offsets`, `n_vocab`, `name`, `save`, `load`, `save_tiktoken`, `load_tiktoken`, `register_special_tokens`, `encode_single_token`, `token_byte_values`
   - Module-level: `get_encoding("gpt2"|"cl100k"|"o200k")`, `train(texts, vocab_size)` (defaults to gpre). Use `_train_impl(texts, vocab_size, "gpt2"|"gpt4")` for specific pretokenizer.
   - `train()` on class instances accepts `vocab_size=` as keyword or positional argument
