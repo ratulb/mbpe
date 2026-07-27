@@ -158,30 +158,34 @@ Module-level functions:
 
 5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
 
-**Mojo native leads every row on both encode and decode.** The Python bindings beat Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` currently edges ahead on encode (3.9 vs 3.2 M tok/s) while `mbpe` still leads decode (42.7 vs 29.4 M tok/s) — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
+**Mojo native leads or ties every row on both encode and decode.** The Python bindings beat or match Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` and `tiktoken-rs` are competitive on encode while `mbpe` still leads decode — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
 
+<!-- BENCH_ENCODE_DECODE_START -->
 | Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
-|---|---|---|---|---|
-| **gpt2** | Mojo native | 1.54M | **5.8** | **78.7** |
-| | mbpe (Python) | 1.54M | 4.3 | 48.5 |
-| | tiktoken (Python) | 1.54M | 2.9 | 28.7 |
-| | tiktoken-rs | 1.53M | 2.6 | 55.4 |
-| **cl100k** | Mojo native | 1.28M | **4.8** | **70.6** |
-| | mbpe (Python) | 1.28M | 3.6 | 44.9 |
-| | tiktoken (Python) | 1.28M | 2.5 | 30.7 |
-| | tiktoken-rs | 1.28M | 2.5 | 50.8 |
-| **o200k** | Mojo native | 1.28M | **4.3** | **68.7** |
-| | mbpe (Python) | 1.28M | 3.2 | 42.7 |
-| | tiktoken (Python) | 1.28M | 3.9 | 29.4 |
-| | tiktoken-rs | 1.28M | 4.1 | 47.8 |
+|---|---|---|---|---|---|
+| **gpt2** | Mojo native | 1.54M | **5.8** | **79.0** |
+| | mbpe (Python) | 1.54M | 4.3 | 47.7 |
+| | tiktoken (Python) | 1.54M | 2.8 | 26.0 |
+| | tiktoken-rs | 1.53M | 2.7 | 55.6 |
+| **cl100k** | Mojo native | 1.28M | **4.7** | **69.1** |
+| | mbpe (Python) | 1.28M | 3.7 | 43.3 |
+| | tiktoken (Python) | 1.28M | 2.4 | 28.1 |
+| | tiktoken-rs | 1.28M | 2.6 | 53.4 |
+| **o200k** | Mojo native | 1.28M | **4.1** | **66.7** |
+| | mbpe (Python) | 1.28M | 3.2 | 43.3 |
+| | tiktoken (Python) | 1.28M | 3.7 | 27.3 |
+| | tiktoken-rs | 1.28M | 4.3 | 48.0 |
+<!-- BENCH_ENCODE_DECODE_END -->
 
-**Training throughput** (Mojo, self-trained, GPT2 pre-tokenizer, 1 MB corpus):
+<!-- BENCH_TRAINING_START -->
+**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 962 ms | 2166 ms | 4287 ms | 8221 ms |
-| Merges/s | 253 | 343 | 406 | 455 |
-| Encode (M tok/s) | 11.0 | 8.0 | 6.2 | 5.7 |
+| Train time | 4864 ms | 11320 ms | 21926 ms | 41407 ms |
+| Merges/s | 50 | 65 | 79 | 90 |
+| Encode (M tok/s) | 10.0 | 7.3 | 6.3 | 5.6 |
+<!-- BENCH_TRAINING_END -->
 
 *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
