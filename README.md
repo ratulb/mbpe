@@ -160,33 +160,27 @@ Module-level functions:
 
 **Mojo native leads or ties every row on both encode and decode.** The Python bindings beat or match Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` and `tiktoken-rs` are competitive on encode while `mbpe` still leads decode — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
 
-<!-- BENCH_ENCODE_DECODE_START -->
 | Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
-|---|---|---|---|---|---|
-| **gpt2** | Mojo native | 1.54M | **5.8** | **79.0** |
-| | mbpe (Python) | 1.54M | 4.3 | 47.7 |
-| | tiktoken (Python) | 1.54M | 2.8 | 26.0 |
-| | tiktoken-rs | 1.53M | 2.7 | 55.6 |
-| **cl100k** | Mojo native | 1.28M | **4.7** | **69.1** |
-| | mbpe (Python) | 1.28M | 3.7 | 43.3 |
-| | tiktoken (Python) | 1.28M | 2.4 | 28.1 |
-| | tiktoken-rs | 1.28M | 2.6 | 53.4 |
-| **o200k** | Mojo native | 1.28M | **4.1** | **66.7** |
-| | mbpe (Python) | 1.28M | 3.2 | 43.3 |
-| | tiktoken (Python) | 1.28M | 3.7 | 27.3 |
-| | tiktoken-rs | 1.28M | 4.3 | 48.0 |
-<!-- BENCH_ENCODE_DECODE_END -->
-
-<!-- BENCH_TRAINING_START -->
+|---|---|---|---|
+| **gpt2** | Mojo native | 1.54M | **5.4** | **72.9** |
+| | mbpe (Python) | 1.54M | 3.9 | 45.3 |
+| | tiktoken (Python) | 1.54M | 2.9 | 27.9 |
+| | tiktoken-rs | 1.53M | 2.6 | 55.4 |
+| **cl100k** | Mojo native | 1.28M | **4.6** | **68.0** |
+| | mbpe (Python) | 1.28M | 3.5 | 40.7 |
+| | tiktoken (Python) | 1.28M | 2.5 | 28.9 |
+| | tiktoken-rs | 1.28M | 2.5 | 51.6 |
+| **o200k** | Mojo native | 1.28M | **4.4** | **68.2** |
+| | mbpe (Python) | 1.28M | 3.1 | 40.3 |
+| | tiktoken (Python) | 1.28M | 3.8 | 26.6 |
+| | tiktoken-rs | 1.28M | 4.2 | 44.9 |
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
-|---|---|---|---|---|
-| Train time | 4864 ms | 11320 ms | 21926 ms | 41407 ms |
-| Merges/s | 50 | 65 | 79 | 90 |
-| Encode (M tok/s) | 10.0 | 7.3 | 6.3 | 5.6 |
-<!-- BENCH_TRAINING_END -->
-
+|---|---|---|---|
+| Train time | 5072 ms | 11557 ms | 22507 ms | 43178 ms |
+| Merges/s | 48 | 64 | 77 | 86 |
+| Encode (M tok/s) | 9.8 | 7.5 | 6.3 | 5.5 |
 *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
 ---

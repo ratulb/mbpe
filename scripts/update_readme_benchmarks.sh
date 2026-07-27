@@ -51,7 +51,7 @@ def tok_fmt(n):
 encodings = ['gpt2', 'cl100k', 'o200k']
 
 print('| Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |')
-print('|---|---|---|---|---|---|')
+print('|---|---|---|---|')
 
 for enc in encodings:
     n = native[enc]
@@ -79,8 +79,8 @@ for enc in encodings:
     print(f'| | tiktoken-rs | {tok_r} | {e_r} | {d_r} |')
 " > /tmp/rb_encode_decode_table.txt
 
-echo "  [5/4] Mojo training pipeline (5 MB)..." >&2
-pixi run mojo -I . "$BMDIR/bm.mojo" > /tmp/rb_mojo_train.json 2>/dev/null
+echo "  [5/4] Mojo training pipeline (5 MB, GPT4 only)..." >&2
+pixi run mojo -I . "$BMDIR/bm_training.mojo" > /tmp/rb_mojo_train.json 2>/dev/null
 
 echo "  Building training table..." >&2
 
@@ -88,10 +88,10 @@ python3 -c "
 import json
 
 lines = open('/tmp/rb_mojo_train.json').read().strip().splitlines()
-gpt4_rows = [json.loads(l) for l in lines if json.loads(l)['variant'] == 'GPT4']
+gpt4_rows = [json.loads(l) for l in lines]
 
 print('| Vocab size | 500 | 1000 | 2000 | 4000 |')
-print('|---|---|---|---|---|')
+print('|---|---|---|---|')
 train = [str(int(r['train_ms'])) + ' ms' for r in gpt4_rows]
 print(f'| Train time | {\" | \".join(train)} |')
 ms = [str(r['train_merges_s']) for r in gpt4_rows]
@@ -112,18 +112,21 @@ with open('$README') as f:
 enc_block = open('/tmp/rb_encode_decode_table.txt').read().strip()
 trn_block = open('/tmp/rb_training_table.txt').read().strip()
 
-# Replace encode/decode table (between markers)
+# Replace encode/decode table (match header through to just before Training section)
+enc_start = r'\| Encoding \| Implementation \| Tokens \| Encode \(M tok/s\) \| Decode \(M tok/s\) \|'
 content = re.sub(
-    r'<!-- BENCH_ENCODE_DECODE_START -->.*?<!-- BENCH_ENCODE_DECODE_END -->',
-    f'<!-- BENCH_ENCODE_DECODE_START -->\\n{enc_block}\\n<!-- BENCH_ENCODE_DECODE_END -->',
+    enc_start + r'.*?(?=\n\*\*Training throughput)',
+    enc_block,
     content,
     flags=re.DOTALL,
 )
 
-# Replace training table (between markers)
+# Replace training section (from **Training** through to just before Environment line)
+trn_start = r'\*\*Training throughput\*\*'
+trn_replacement = f'**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):\n\n{trn_block}'
 content = re.sub(
-    r'<!-- BENCH_TRAINING_START -->.*?<!-- BENCH_TRAINING_END -->',
-    f'<!-- BENCH_TRAINING_START -->\\n**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):\\n\\n{trn_block}\\n<!-- BENCH_TRAINING_END -->',
+    trn_start + r'.*?(?=\n\*Environment:)',
+    trn_replacement,
     content,
     flags=re.DOTALL,
 )
