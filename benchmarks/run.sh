@@ -41,7 +41,7 @@ else
 fi
 
 echo "  Building _mbpe.so..." >&2
-pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so 2>&1 | tail -1 >&2
+pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so 2>&1 | tail -1 >&2
 echo "  _mbpe.so built" >&2
 
 # ── Generate corpora (stdout → stderr) ──────────────────────────

@@ -1,0 +1,2 @@
+include python-binding/mbpe/_mbpe.so
+include python-binding/mbpe/data/*.tiktoken

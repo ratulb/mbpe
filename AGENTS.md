@@ -22,7 +22,7 @@ All via `pixi run` or inside `pixi shell`:
 - **Direct benchmark**: `mojo -I . benchmarks/bm.mojo` (single corpus via `BPE_CORPUS`)
 - **Full reference**: `benchmarks/BENCHMARKS.md` — methodology, output schemas, file-by-file docs
 - **Reference splits**: `pixi run gen-refs`
-- **Python bindings**: `mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so`
+- **Python bindings**: `mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so`
   - Then: `PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPreTokenizer()"`
 - **Python tests**: `pixi run python-tests` → `python -m pytest tests/python/ -v --tb=short`
 - **Python coverage**: `pixi run python-cov` → `python -m pytest tests/python/ --cov=mbpe --cov-report=term-missing`

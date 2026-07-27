@@ -1,6 +1,6 @@
 """Python bindings for mbpe — all 4 BPETokenizer variants.
 
-Build: mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so
+Build: mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
 Use:   PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPreTokenizer()"
 """
 

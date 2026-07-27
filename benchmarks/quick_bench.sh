@@ -18,7 +18,7 @@ CORPUS_PATH="$BMDIR/$CORPUS"
 source "$BMDIR/setup_bench_env.sh" >&2
 
 # Build _mbpe.so if stale
-pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so 2>/dev/null
+pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so 2>/dev/null
 
 # Generate corpora if missing
 if [ ! -f "$CORPUS_PATH" ]; then

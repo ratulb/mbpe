@@ -37,5 +37,13 @@ lb_*.mojo
 benchmarks/verify_levelb.*
 
 # built shared libraries
-python-binding/*.so
+python-binding/**/*.so
 *.so
+
+# Python package build artifacts
+dist/
+build/
+*.egg-info/
+
+# data files copied into package during PyPI build (originals in data/)
+python-binding/mbpe/data/

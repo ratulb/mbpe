@@ -14,7 +14,7 @@
 
 ### Python binding layer
 
-The Mojo `.so` is built as `python-binding/_mbpe.so`. A Python package at `python-binding/mbpe/__init__.py` wraps it,
+The Mojo `.so` is built as `python-binding/mbpe/_mbpe.so`. A Python package at `python-binding/mbpe/__init__.py` wraps it,
 adding `allowed_special`/`disallowed_special` support in pure Python and delegating everything else via `__getattr__`.
 
 ### Test layout

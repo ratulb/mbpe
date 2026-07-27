@@ -12,7 +12,7 @@ jobs:
       - name: Install dependencies via pixi
         run: pixi install --environment dev
       - name: Build Mojo shared library
-        run: pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so
+        run: pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
       - name: Run tests
         run: pixi run --environment dev python -m pytest tests/python/ -v --tb=short
       - name: Coverage

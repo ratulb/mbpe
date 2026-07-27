@@ -129,7 +129,7 @@ These are assembled into the final report by `collate.py`:
 ### Mojo
 - `mojo` CLI available (via `pixi shell` or `pixi run`)
 - `bpe/` module (imported via `-I .`)
-- `_mbpe.so` built: `mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so`
+- `_mbpe.so` built: `mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so`
 
 ### Python tiktoken
 - Python venv at `/tmp/mbpe-bench-venv/` with `tiktoken` installed (auto-setup by `setup_bench_env.sh`)
@@ -153,7 +153,7 @@ These are assembled into the final report by `collate.py`:
 Build the shared library first (one-time):
 
 ```bash
-mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so
+mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
 ```
 
 ### Smoke benchmark (~2 seconds, no file dependencies)

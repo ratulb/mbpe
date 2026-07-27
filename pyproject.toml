@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mbpe"
+version = "0.1.0"
+description = "BPE tokenizer — Mojo implementation with Python bindings"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "tenmoomnet"}]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/tenmoomnet/mbpe"
+
+[tool.setuptools.packages.find]
+where = ["python-binding"]
+include = ["mbpe*"]
+
+[tool.setuptools.package-data]
+mbpe = ["_mbpe.so", "data/*.tiktoken"]

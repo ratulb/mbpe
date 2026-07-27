@@ -1,0 +1,44 @@
+name: Publish to PyPI
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8
+        with:
+          pixi-version: v0.41.4
+          cache: true
+
+      - name: Build _mbpe.so
+        run: |
+          pixi run mojo build python-binding/mbpe.mojo -I . \
+            --emit shared-lib -o python-binding/mbpe/_mbpe.so
+
+      - name: Copy data files into package
+        run: |
+          mkdir -p python-binding/mbpe/data
+          cp data/*.tiktoken python-binding/mbpe/data/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - name: Repair wheel (bundle Mojo runtime)
+        run: |
+          pip install auditwheel
+          auditwheel repair dist/*.whl -w dist/
+
+      - uses: pypa/gh-action-pypi-publish@v1.12
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

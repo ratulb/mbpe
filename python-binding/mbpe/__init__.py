@@ -4,8 +4,9 @@ Adds Pythonic encode() with allowed_special/disallowed_special kwargs,
 matching the tiktoken API surface. Everything else delegates to the
 Mojo shared library via __getattr__.
 """
-import _mbpe
+from . import _mbpe
 import os
+import sys
 
 
 class _BaseTokenizer:
@@ -154,8 +155,22 @@ class GPT4oTokenizer(_BaseTokenizer):
 # ── Module-level helpers ────────────────────────────────────────
 
 def _find_data_dir():
-    mod_dir = os.path.dirname(os.path.realpath(_mbpe.__file__))
-    return os.path.normpath(os.path.join(mod_dir, "..", "data"))
+    # Use importlib.resources for installed packages (wheel)
+    try:
+        import importlib.resources as res
+        pkg = res.files("mbpe")
+        d = pkg / "data"
+        if d.is_dir():
+            return str(d)
+    except Exception:
+        pass
+    # Fallback for development (built .so inside package dir)
+    mod_dir = os.path.dirname(os.path.realpath(__file__))
+    d = os.path.join(mod_dir, "data")
+    if os.path.isdir(d):
+        return d
+    # Legacy fallback (built .so one level up)
+    return os.path.normpath(os.path.join(mod_dir, "..", "..", "data"))
 
 
 _ENCODING_MAP = {
