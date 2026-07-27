@@ -1,6 +1,6 @@
 """Benchmark suite for simple_bpe BPETokenizer encode/decode speed."""
 
-from tokenizer import BPETokenizer
+from bpe.tokenizer import BPETokenizer
 from std.time import perf_counter_ns
 
 

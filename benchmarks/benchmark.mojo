@@ -4,8 +4,8 @@ Outputs JSON lines for each (variant, vocab_size) combination.
 Usage:  mojo -I . benchmarks/bm.mojo
 """
 
-from tokenizer import BPETokenizer
-from pretokenizer import (
+from bpe.tokenizer import BPETokenizer
+from bpe.pretokenizer import (
     GPreTokenizer,
     GPT2Pretokenizer,
     GPT4Pretokenizer,

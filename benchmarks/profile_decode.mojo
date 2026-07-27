@@ -1,5 +1,5 @@
 """Profile decode steps."""
-from tokenizer import BPETokenizer
+from bpe.tokenizer import BPETokenizer
 from std.pathlib import Path
 from std.time import perf_counter_ns
 

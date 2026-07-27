@@ -1,7 +1,7 @@
 """Benchmark comparing three encode approaches."""
 
-from tokenizer import BPETokenizer
-from pretokenizer import GPreTokenizer
+from bpe.tokenizer import BPETokenizer
+from bpe.pretokenizer import GPreTokenizer
 from std.time import perf_counter_ns
 
 
