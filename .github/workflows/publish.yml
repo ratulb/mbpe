@@ -32,16 +32,23 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install patchelf (for auditwheel)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq patchelf
+
       - name: Build wheel
         run: |
           pip install build
           python -m build --wheel
 
-      - name: Repair wheel (bundle Mojo runtime)
+      - name: Repair wheel (bundle Mojo runtime libs)
         run: |
-          sudo apt-get install -y patchelf
           pip install auditwheel
-          auditwheel repair dist/*.whl -w dist/
+          # Point auditwheel at pixi's lib dir so it can find Mojo runtime .so files
+          LD_LIBRARY_PATH="$PWD/.pixi/envs/default/lib" \
+            auditwheel repair dist/*.whl -w dist/
+          rm -f dist/*none-any.whl  # remove un-repaired wheel
 
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
