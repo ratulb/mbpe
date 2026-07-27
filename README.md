@@ -17,9 +17,9 @@ print(decoded)
 ## Why mbpe?
 
 - **Drop-in replacement for `tiktoken`** — same `get_encoding()`, same `encode()` with `allowed_special`/`disallowed_special`, same `.tiktoken` format
-- **Faster** — Mojo native is beats tiktoken's backing rust implementation, mbpe python binding is ~2× faster than `tiktoken` python
+- **Faster** — Mojo native beats tiktoken's backing Rust implementation, mbpe Python bindings are ~2× faster than `tiktoken` Python
 - **Train your own tokenizer** — `tokenizer.train(["hello world"], vocab_size=300)` from scratch, save to `.tiktoken` format
-- **Plug-in your own pre-tokenizer** — Mojo trait based pre-tokenizers. Ships with pre-tokenizers for r50k_base, cl100k_base and cl100k encodings
+- **Plug-in your own pre-tokenizer** — Mojo trait-based pre-tokenizers. Ships with pre-tokenizers for r50k_base, cl100k_base and o200k encodings
 - **Byte-level** — All 256 bytes as base vocabulary, no UNK token, lossless for any UTF-8 input
 
 ---
@@ -52,7 +52,7 @@ print(tokenizer.n_vocab)                          # 100256
 
 # GPT-4o (o200k_base, ~200K vocab)
 tokenizer = mbpe.get_encoding("o200k")
-print(len(tokenizer)                          # 199063
+print(tokenizer.n_vocab)                          # 199063
 ```
 
 ### Train from scratch
@@ -61,7 +61,7 @@ print(len(tokenizer)                          # 199063
 tokenizer = mbpe.GPreTokenizer()
 corpus = ["the cat sat on the mat", "the dog sat on the log"]
 tokenizer.train(corpus, vocab_size=300)
-print(tok.encode("the cat sat"))            # [259, 264, 265]
+print(tokenizer.encode("the cat sat"))            # [259, 264, 265]
 tokenizer.save_tiktoken("my_tokenizer.tiktoken")
 
 # Or train with a GPT-4-style pre-tokenizer
@@ -92,7 +92,7 @@ tokenizer = mbpe.get_encoding("gpt2")
 
 tokenizer.decode([31373, 995])                    # "hello world"
 tokenizer.decode_bytes([31373, 995])              # b"hello world"
-tokenizer.decode_with_offsets([31373, 995])       # decoded text + byte offsets
+tokenizer.decode_with_offsets([31373, 995])       # ("hello world", [(0, 5), (5, 11)])
 tokenizer.decode_single_token_bytes(31373)        # b"hello"
 ```
 
@@ -104,7 +104,7 @@ tokenizer.save_tiktoken("backup.tiktoken")
 
 tokenizer2 = mbpe.GPT2Tokenizer()
 tokenizer2.load_tiktoken("backup.tiktoken")
-assert tokenizer.n_vocab == tokenizer.n_vocab
+assert tokenizer2.n_vocab == tokenizer.n_vocab
 ```
 
 ### Register custom special tokens
@@ -134,9 +134,9 @@ All four classes share the same method interface:
 | `encode(text, **kwargs)` | Encode with special token handling |
 | `encode_ordinary(text)` | Encode ignoring special tokens |
 | `decode(ids)` | Decode token IDs to string |
-| `decode_bytes(ids)` | Decode to raw bytes |
+| `decode_bytes(ids)` | Decode to raw `bytes` |
 | `decode_single_token_bytes(id)` | Raw bytes for one token |
-| `decode_with_offsets(ids)` | Decode with byte-offset tracking |
+| `decode_with_offsets(ids)` | `(text, [(start, end), ...])` — decoded text with byte offsets per token |
 | `encode_single_token(text)` | Look up a token string's ID |
 | `token_byte_values()` | Raw bytes for all token IDs |
 | `name()` | Pre-tokenizer name |
@@ -222,3 +222,9 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 ```
 
 ---
+
+## Related projects
+
+- [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python)
+- [minbpe](https://github.com/karpathy/minbpe) — Minimal BPE in pure Python
+- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
