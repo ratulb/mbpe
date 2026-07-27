@@ -1,12 +1,10 @@
 # mbpe
 
-**BPE tokenizer in Mojo** with Python bindings. tiktoken-compatible. 2× faster encode/decode.
+**BPE tokenizer in Mojo** with Python bindings. **tiktoken-compatible. 2×** faster encode/decode.
 
-```
+---
 ```python
-
 # Load a pre-built encoding
-
 tok = mbpe.get_encoding("gpt2") 
 print(tok.n_vocab) # 50257 
 tokens = tok.encode("hello world") 
