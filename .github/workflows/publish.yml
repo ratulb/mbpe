@@ -43,6 +43,6 @@ jobs:
           pip install auditwheel
           auditwheel repair dist/*.whl -w dist/
 
-      - uses: pypa/gh-action-pypi-publish@v1.12
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
