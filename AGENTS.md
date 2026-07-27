@@ -19,6 +19,7 @@ All via `pixi run` or inside `pixi shell`:
   - Collation: `python benchmarks/collate.py <mojo.json> <tiktoken.json> <tiktoken-rs.json> <mbpe.json>`
 - **Benchmark setup**: `bash benchmarks/setup_bench_env.sh` — installs Rust (rustup) + Python venv at `/tmp/mbpe-bench-venv/` with tiktoken. Sourced by `run.sh` and `quick_bench.sh` automatically.
 - **Direct benchmark**: `mojo -I . benchmarks/bm.mojo` (single corpus via `BPE_CORPUS`)
+- **Full reference**: `benchmarks/BENCHMARKS.md` — methodology, output schemas, file-by-file docs
 - **Reference splits**: `pixi run gen-refs`
 - **Python bindings**: `mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/_mbpe.so`
   - Then: `PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPreTokenizer()"`
