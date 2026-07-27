@@ -42,87 +42,77 @@ Linux x86_64 only (Mojo runtime bundled). Requires Python ≥ 3.9.
 import mbpe
 
 # GPT-2 (r50k_base, ~50K vocab)
-tok = mbpe.get_encoding("gpt2")
-print(tok.n_vocab)                          # 50257
-print(tok.encode("hello world"))            # [31373, 995]
+tokenizer = mbpe.get_encoding("gpt2")
+print(tokenizer.n_vocab)                          # 50257
+print(tokenizer.encode("hello world"))            # [31373, 995]
 
 # GPT-4 (cl100k_base, ~100K vocab)
-tok = mbpe.get_encoding("cl100k")
-print(tok.n_vocab)                          # 100256
+tokenizer = mbpe.get_encoding("cl100k")
+print(tokenizer.n_vocab)                          # 100256
 
 # GPT-4o (o200k_base, ~200K vocab)
-tok = mbpe.get_encoding("o200k")
-print(tok.n_vocab)                          # 199063
+tokenizer = mbpe.get_encoding("o200k")
+print(len(tokenizer)                          # 199063
 ```
 
 ### Train from scratch
 
 ```python
-tok = mbpe.GPreTokenizer()
+tokenizer = mbpe.GPreTokenizer()
 corpus = ["the cat sat on the mat", "the dog sat on the log"]
-tok.train(corpus, vocab_size=300)
+tokenizer.train(corpus, vocab_size=300)
 print(tok.encode("the cat sat"))            # [259, 264, 265]
-tok.save_tiktoken("my_tokenizer.tiktoken")
+tokenizer.save_tiktoken("my_tokenizer.tiktoken")
 
 # Or train with a GPT-4-style pre-tokenizer
-tok = mbpe.GPT4Tokenizer()
-tok.train(corpus, vocab_size=300)
+tokenizer = mbpe.GPT4Tokenizer()
+tokenizer.train(corpus, vocab_size=300)
 ```
 
 ### Encode with special tokens
 
 ```python
-tok = mbpe.get_encoding("gpt2")
+tokenizer = mbpe.get_encoding("gpt2")
 
 # Encode handles special tokens (e.g. <|endoftext|>)
-tok.encode("<|endoftext|>hello")            # [50256, 31373, 995]
+tokenizer.encode("<|endoftext|>hello")            # [50256, 31373, 995]
 
 # encode_ordinary ignores them
-tok.encode_ordinary("<|endoftext|>hello")   # [91, 12259, 95, 31373, 995]
+tokenizer.encode_ordinary("<|endoftext|>hello")   # [91, 12259, 95, 31373, 995]
 
 # Control which specials are allowed
-tok.encode("<|endoftext|>hello", allowed_special={"<|endoftext|>"})
-tok.encode("<|endoftext|>hello", allowed_special="all")   # default
+tokenizer.encode("<|endoftext|>hello", allowed_special={"<|endoftext|>"})
+tokenizer.encode("<|endoftext|>hello", allowed_special="all")   # default
 ```
 
 ### Decode
 
 ```python
-tok = mbpe.get_encoding("gpt2")
+tokenizer = mbpe.get_encoding("gpt2")
 
-tok.decode([31373, 995])                    # "hello world"
-tok.decode_bytes([31373, 995])              # b"hello world"
-tok.decode_with_offsets([31373, 995])       # decoded text + byte offsets
-tok.decode_single_token_bytes(31373)        # b"hello"
+tokenizer.decode([31373, 995])                    # "hello world"
+tokenizer.decode_bytes([31373, 995])              # b"hello world"
+tokenizer.decode_with_offsets([31373, 995])       # decoded text + byte offsets
+tokenizer.decode_single_token_bytes(31373)        # b"hello"
 ```
 
 ### Save and load
 
 ```python
-tok = mbpe.get_encoding("gpt2")
-tok.save_tiktoken("backup.tiktoken")
+tokenizer = mbpe.get_encoding("gpt2")
+tokenizer.save_tiktoken("backup.tiktoken")
 
-tok2 = mbpe.GPT2Tokenizer()
-tok2.load_tiktoken("backup.tiktoken")
-assert tok2.n_vocab == tok.n_vocab
+tokenizer2 = mbpe.GPT2Tokenizer()
+tokenizer2.load_tiktoken("backup.tiktoken")
+assert tokenizer.n_vocab == tokenizer.n_vocab
 ```
 
 ### Register custom special tokens
 
 ```python
-tok = mbpe.GPreTokenizer()
-tok.register_special_tokens({"<|im_start|>": 256, "<|im_end|>": 257})
-print(tok.encode("<|im_start|> hello"))     # [256, 264, 265]
-```
-
-### Module-level helpers
-
-```python
-# Default (GPreTokenizer)
-tok = mbpe.train(["hello world"], vocab_size=300)
-
-# Specific pre-tokenizer
-tok = mbpe._train_impl(["hello world"], 300, "gpt2")
+tokenizer = mbpe.GPreTokenizer()
+tokenizer.register_special_tokens({"<|im_start|>": 256, "<|im_end|>": 257})
+print(tokenizer.encode("<|im_start|> hello"))     # [256, 264, 265]
 ```
 
 ---
@@ -232,9 +222,3 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 ```
 
 ---
-
-## Related projects
-
-- [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python)
-- [minbpe](https://github.com/karpathy/minbpe) — Minimal BPE in pure Python
-- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
