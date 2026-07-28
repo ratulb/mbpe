@@ -131,7 +131,6 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
 
     Layout (one contiguous allocation):
       [Atomic[UInt64] refcount (8 bytes)]  [Int × CACHE_ENTRIES data (8 MB)]
-      ^-- _refcount                         ^-- _fast
 
     Copying bumps the refcount — the flat array is shared, not duplicated.
     The last drop frees the entire block.  _slow is always owned (deep-copied).
@@ -218,8 +217,8 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
 #  1. Training record — `train()` appends (a_id, b_id, merged_id) in learn
 #     order.  merged_id = len(vocab) at that point, which IS the rank.
 #     Without `merges` we'd lose what was learned and in what order.
-#  2. Compact serialisation — `save()` writes the merge list as a few KB.
-#     Serialising the 8 MB MergeLookup flat array instead would bloat every
+#  2. Compact serialization — `save()` writes the merge list as a few KB.
+#     Serializing the 8 MB MergeLookup flat array instead would bloat every
 #     save file by 4000×.
 #  3. Rebuild from truth — `load()` reconstructs `lookup_table` from
 #     `merges` (a single linear scan).  The merge list is the source of
