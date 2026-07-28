@@ -495,7 +495,7 @@ def test_load_o200k_base() raises:
     plus encode/decode roundtrip.  Uses GPT4Pretokenizer[ByteMapping.SHUFFLED]
     because o200k_base uses a permuted byte-to-ID mapping (rank 0 = '!' not 0x00)."""
     var tok = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
-    tok.load_tiktoken("/home/tenmoomnet/bpe.mojo/data/o200k_base.tiktoken")
+    tok.load_tiktoken("data/o200k.tiktoken")
 
     # o200k_base has 199,998 file entries, plus 21 reserved/special IDs (199998-200018)
     assert_equal(len(tok), 200019)
