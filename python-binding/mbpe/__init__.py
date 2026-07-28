@@ -4,6 +4,14 @@ Adds Pythonic encode() with allowed_special/disallowed_special kwargs,
 matching the tiktoken API surface. Everything else delegates to the
 Mojo shared library via __getattr__.
 """
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="builtin type .* has no __module__ attribute",
+    category=DeprecationWarning,
+)
+
 from . import _mbpe
 import os
 import sys
