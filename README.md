@@ -55,11 +55,11 @@ print(tokenizer.encode("hello world"))            # [31373, 995]
 
 # GPT-4 (cl100k_base, ~100K vocab)
 tokenizer = mbpe.get_encoding("cl100k")
-print(tokenizer.n_vocab)                          # 100256
+print(tokenizer.n_vocab)                          # 100277
 
 # GPT-4o (o200k_base, ~200K vocab)
 tokenizer = mbpe.get_encoding("o200k")
-print(tokenizer.n_vocab)                          # 199063
+print(tokenizer.n_vocab)                          # 200019
 ```
 
 ### Train from scratch
@@ -68,7 +68,7 @@ print(tokenizer.n_vocab)                          # 199063
 tokenizer = mbpe.GPreTokenizer()
 corpus = ["the cat sat on the mat", "the dog sat on the log"]
 tokenizer.train(corpus, vocab_size=300)
-print(tokenizer.encode("the cat sat"))            # [259, 264, 265]
+print(tokenizer.encode("the cat sat"))            # [259, 270, 265]
 tokenizer.save_tiktoken("my_tokenizer.tiktoken")
 
 # Or train with a GPT-4-style pre-tokenizer
@@ -82,14 +82,14 @@ tokenizer.train(corpus, vocab_size=300)
 tokenizer = mbpe.get_encoding("gpt2")
 
 # Encode handles special tokens (e.g. <|endoftext|>)
-tokenizer.encode("<|endoftext|>hello")            # [50256, 31373, 995]
+tokenizer.encode("<|endoftext|>hello world")      # [50256, 31373, 995]
 
 # encode_ordinary ignores them
-tokenizer.encode_ordinary("<|endoftext|>hello")   # [91, 12259, 95, 31373, 995]
+tokenizer.encode_ordinary("<|endoftext|>hello")   # [27, 91, 437, 1659, 5239, 91, 29, 31373]
 
 # Control which specials are allowed
-tokenizer.encode("<|endoftext|>hello", allowed_special={"<|endoftext|>"})
-tokenizer.encode("<|endoftext|>hello", allowed_special="all")   # default
+tokenizer.encode("<|endoftext|>hello world", allowed_special={"<|endoftext|>"})
+tokenizer.encode("<|endoftext|>hello world", allowed_special="all")   # default
 ```
 
 ### Decode
@@ -117,9 +117,9 @@ assert tokenizer2.n_vocab == tokenizer.n_vocab
 ### Register custom special tokens
 
 ```python
-tokenizer = mbpe.GPreTokenizer()
-tokenizer.register_special_tokens({"<|im_start|>": 256, "<|im_end|>": 257})
-print(tokenizer.encode("<|im_start|> hello"))     # [256, 264, 265]
+tokenizer = mbpe.get_encoding("gpt2")
+tokenizer.register_special_tokens({"<|im_start|>": 50257, "<|im_end|>": 50258})
+print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 ```
 
 ---
