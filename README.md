@@ -156,24 +156,38 @@ Module-level functions:
 
 ## Benchmarks
 
-5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
+5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies. **Bold** marks the fastest implementation in each column. `mbpe` shows up twice per table — once as the pure Mojo binary, once through its Python bindings — so those two rows are labeled explicitly below rather than left as a bare "Mojo native."
 
 **Mojo native leads or ties every row on both encode and decode.** The Python bindings beat or match Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` and `tiktoken-rs` are competitive on encode while `mbpe` still leads decode — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
 
-| Encoding | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
-|---|---|---|---|---|
-| **gpt2** | Mojo native | 1.54M | **5.4** | **72.9** |
-| | mbpe (Python) | 1.54M | 3.9 | 45.3 |
-| | tiktoken (Python) | 1.54M | 2.9 | 27.9 |
-| | tiktoken-rs | 1.53M | 2.6 | 55.4 |
-| **cl100k** | Mojo native | 1.28M | **4.6** | **68.0** |
-| | mbpe (Python) | 1.28M | 3.5 | 40.7 |
-| | tiktoken (Python) | 1.28M | 2.5 | 28.9 |
-| | tiktoken-rs | 1.28M | 2.5 | 51.6 |
-| **o200k** | Mojo native | 1.28M | **4.4** | **68.2** |
-| | mbpe (Python) | 1.28M | 3.1 | 40.3 |
-| | tiktoken (Python) | 1.28M | 3.8 | 26.6 |
-| | tiktoken-rs | 1.28M | 4.2 | 44.9 |
+#### gpt2 (r50k_base)
+
+| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
+|---|---|---|---|
+| **mbpe — Mojo native** | 1.54M | **5.4** | **72.9** |
+| mbpe — Python bindings | 1.54M | 3.9 | 45.3 |
+| tiktoken (Python) | 1.54M | 2.9 | 27.9 |
+| tiktoken-rs | 1.53M | 2.6 | 55.4 |
+
+#### cl100k (cl100k_base)
+
+| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
+|---|---|---|---|
+| **mbpe — Mojo native** | 1.28M | **4.6** | **68.0** |
+| mbpe — Python bindings | 1.28M | 3.5 | 40.7 |
+| tiktoken (Python) | 1.28M | 2.5 | 28.9 |
+| tiktoken-rs | 1.28M | 2.5 | 51.6 |
+
+#### o200k (o200k_base)
+
+| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
+|---|---|---|---|
+| **mbpe — Mojo native** | 1.28M | 4.4 | **68.2** |
+| mbpe — Python bindings | 1.28M | 3.1 | 40.3 |
+| tiktoken (Python) | 1.28M | 3.8 | 26.6 |
+| tiktoken-rs | 1.28M | **4.2** | 44.9 |
+
+> On o200k, `tiktoken-rs` edges out encode speed (4.2 vs. 4.4 M tok/s is within noise, but reported as-is); `mbpe` Mojo native still leads decode by a wide margin.
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
@@ -193,7 +207,7 @@ Module-level functions:
 
 - **Byte-level base vocabulary** — all 256 byte values (0x00–0xFF), no UNK token. Every valid UTF-8 input is losslessly representable.
 - **GPT-2 `bytes_to_unicode`** — printable bytes map to themselves; control/whitespace bytes map to unused Unicode codepoints ≥ 256.
-- **PairCache** — two-tier merge lookup: a flat 1024×1024 Int array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Transforms sequential rule application into O(1) rank-based lookup — 3× encode speedup vs. naive scanning.
+- **MergeLookup** — two-tier merge lookup: a flat 1024×1024 Byte array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Transforms sequential rule application into O(1) rank-based lookup — 3× encode speedup vs. naive scanning.
 - **Incremental pair stats** — during training, only 5 pair updates per merge occurrence instead of a full corpus rescan (O(N) vs O(V×W)).
 - **Memcpy decode** — pre-computed flat byte array with token offsets enables bulk memcpy for decode.
 - **3 pre-tokenizers**: Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
@@ -203,7 +217,7 @@ Module-level functions:
 ## Development
 
 ```bash
-git clone https://github.com/tenmoomnet/mbpe
+git clone https://github.com/ratulb/mbpe
 cd mbpe
 
 # Install dependencies
