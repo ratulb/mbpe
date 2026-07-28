@@ -37,8 +37,15 @@ from std.memory import alloc, memcpy
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 from std.base64 import b64encode, b64decode
+from std.os.env import getenv
 
-from bpe.pretokenizer import PreTokenizer, GPreTokenizer, ByteMapping
+from bpe.pretokenizer import (
+    PreTokenizer,
+    GPreTokenizer,
+    GPT2Pretokenizer,
+    GPT4Pretokenizer,
+    ByteMapping,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1042,3 +1049,44 @@ def merge_inplace(
             i += 1
         w += 1
     return w
+
+
+# ── Convenience API: pre-built encodings ──────────────────────────
+
+def _find_data_dir() raises -> String:
+    """Locate the .tiktoken data files.
+
+    Order: MBPE_DATA_DIR env var  →  ./data/  →  ../data/
+    """
+    var env_dir = getenv("MBPE_DATA_DIR", "")
+    if env_dir.byte_length() > 0:
+        return env_dir
+    return "data"
+
+
+struct Tokenizers:
+    """Type-level enumeration of built-in encodings.
+
+    Usage:
+        var gpt2   = Tokenizers.get[Tokenizers.gpt2]()
+        var cl100k = Tokenizers.get[Tokenizers.cl100k]()
+        var o200k  = Tokenizers.get[Tokenizers.o200k]()
+    """
+
+    comptime gpt2 = GPT2Pretokenizer
+    comptime cl100k = GPT4Pretokenizer[ByteMapping.SEQUENTIAL]
+    comptime o200k = GPT4Pretokenizer[ByteMapping.SHUFFLED]
+
+    @staticmethod
+    def get[T: PreTokenizer]() raises -> BPETokenizer[T]:
+        var tok = BPETokenizer[T]()
+        tok.load_tiktoken(_find_data_dir() + "/" + T.name() + ".tiktoken")
+        return tok^
+
+    @staticmethod
+    def train[T: PreTokenizer](
+        corpus: Span[String, _], vocab_size: Int
+    ) raises -> BPETokenizer[T]:
+        var tok = BPETokenizer[T]()
+        tok.train(corpus, vocab_size)
+        return tok^

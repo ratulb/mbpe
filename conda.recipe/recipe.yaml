@@ -1,0 +1,55 @@
+schema_version: 1
+
+context:
+  version: "0.1.1"
+
+package:
+  name: mbpe
+  version: ${{ version }}
+
+source:
+  # Local dev: path relative to recipe directory
+  path: ..
+  # CI (submit to modular-community): uncomment + update rev after commit
+  # - git: https://github.com/ratulb/mbpe.git
+  #   rev: <replace-with-actual-sha-after-commit>
+
+build:
+  number: 0
+  script:
+    - mojo precompile bpe -o $PREFIX/lib/mojo/bpe.mojoc
+    - mkdir -p $PREFIX/share/mbpe/data
+    - cp data/*.tiktoken $PREFIX/share/mbpe/data/
+    - mkdir -p $PREFIX/etc/conda/activate.d $PREFIX/etc/conda/deactivate.d
+    - 'echo ''export MBPE_DATA_DIR="${CONDA_PREFIX}/share/mbpe/data"'' > $PREFIX/etc/conda/activate.d/mbpe.sh'
+    - 'echo ''setenv MBPE_DATA_DIR "${CONDA_PREFIX}/share/mbpe/data"'' > $PREFIX/etc/conda/activate.d/mbpe.csh'
+    - 'echo ''unset MBPE_DATA_DIR'' > $PREFIX/etc/conda/deactivate.d/mbpe.sh'
+    - 'echo ''unsetenv MBPE_DATA_DIR'' > $PREFIX/etc/conda/deactivate.d/mbpe.csh'
+
+requirements:
+  build:
+    - mojo-compiler
+  host:
+    - mojo-compiler
+  run:
+    - ${{ pin_compatible('mojo-compiler') }}
+
+tests:
+  - script:
+      - if: unix
+        then:
+          - mojo run test_import.mojo
+    files:
+      recipe:
+        - test_import.mojo
+
+about:
+  homepage: https://github.com/ratulb/mbpe
+  license: MIT
+  license_file: LICENSE
+  summary: Byte Pair Encoding tokenizer for Mojo — train, encode, decode, save, load.
+  repository: https://github.com/ratulb/mbpe
+
+extra:
+  maintainers:
+    - ratulb

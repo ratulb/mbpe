@@ -31,6 +31,14 @@ pip install mbpe
 
 Linux x86_64 only (Mojo runtime bundled). Requires Python ≥ 3.9.
 
+**Mojo (conda):**
+
+```bash
+pixi add mbpe --channel https://repo.prefix.dev/modular-community
+```
+
+Requires `mojo-compiler >=1.0.0b2`. The `.tiktoken` data files are auto-discovered when the environment is activated (via `MBPE_DATA_DIR`). Set this env var manually if using outside conda.
+
 ---
 
 ## Usage
@@ -154,6 +162,35 @@ Module-level functions:
 
 ---
 
+### Mojo (native)
+
+| Struct | Usage | Pre-tokenizer |
+|---|---|---|
+| `Tokenizers.get[Tokenizers.gpt2]()` | `→ BPETokenizer[GPT2Pretokenizer]` | r50k_base |
+| `Tokenizers.get[Tokenizers.cl100k]()` | `→ BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base |
+| `Tokenizers.get[Tokenizers.o200k]()` | `→ BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base |
+
+```mojo
+from bpe.tokenizer import Tokenizers
+
+def example() raises:
+    var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
+    var ids = gpt2.encode("hello world")
+    print(gpt2.decode(ids))
+```
+
+`Tokenizers.get[]` loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`. To train, parameterize `BPETokenizer` directly:
+
+```mojo
+from bpe.tokenizer import BPETokenizer
+from bpe.pretokenizer import GPT2Pretokenizer
+
+var tok = BPETokenizer[GPT2Pretokenizer]()
+tok.train(Span[String](["hello world"]), 300)
+```
+
+---
+
 ## Benchmarks
 
 5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies. **Bold** marks the fastest implementation in each column. `mbpe` shows up twice per table — once as the pure Mojo binary, once through its Python bindings — so those two rows are labeled explicitly below rather than left as a bare "Mojo native."
@@ -201,7 +238,13 @@ Module-level functions:
 
 ## Architecture
 
-**`BPETokenizer[PT]`** — parameterized by pre-tokenizer type at compile time.
+**`BPETokenizer[PT]`** / **`Tokenizers.get[]`** — parameterized by pre-tokenizer type at compile time. The `Tokenizers` struct provides convenient comptime aliases:
+
+- `Tokenizers.gpt2` → `GPT2Pretokenizer`
+- `Tokenizers.cl100k` → `GPT4Pretokenizer[ByteMapping.SEQUENTIAL]`
+- `Tokenizers.o200k` → `GPT4Pretokenizer[ByteMapping.SHUFFLED]`
+
+Use `Tokenizers.get[Tokenizers.gpt2]()` to load a pre-built encoding from its `.tiktoken` file.
 
 - **Byte-level base vocabulary** — all 256 byte values (0x00–0xFF), no UNK token. Every valid UTF-8 input is losslessly representable.
 - **GPT-2 `bytes_to_unicode`** — printable bytes map to themselves; control/whitespace bytes map to unused Unicode codepoints ≥ 256.

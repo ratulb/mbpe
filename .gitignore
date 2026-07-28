@@ -47,3 +47,4 @@ build/
 
 # data files copied into package during PyPI build (originals in data/)
 python-binding/mbpe/data/
+output/
