@@ -37,7 +37,6 @@ from std.memory import alloc, memcpy
 from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 from std.base64 import b64encode, b64decode
-from std.format import Writable, Writer
 
 from bpe.pretokenizer import PreTokenizer, GPreTokenizer, ByteMapping
 
@@ -224,9 +223,11 @@ struct PairCache(ImplicitlyCopyable & Movable & Writable):
 #   c) encode() is a simple passthrough — _tokenize returns IDs directly
 # ---------------------------------------------------------------------------
 
+comptime Vocabulary = List[String]
+
 struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable & Writable):
     var pt: Self.PT
-    var vocab: List[String]
+    var vocab: Vocabulary
     var merges: List[MergeRule]
     var merge_cache: PairCache
     var byte_to_cp: Dict[Int, Int]
@@ -240,7 +241,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable & Writable
 
     def __init__(out self):
         self.pt = Self.PT()
-        self.vocab = List[String]()
+        self.vocab = Vocabulary()
         self.merges = List[MergeRule]()
         self.merge_cache = PairCache()
         self.byte_to_cp = Dict[Int, Int]()
@@ -343,7 +344,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable & Writable
         # For SEQUENTIAL: rank == byte, so vocab[rank] = display(byte).
         # For SHUFFLED:   rank != byte, so we use id_to_byte(rank) to find
         # the raw byte for each rank, ensuring vocab[rank] is correct.
-        self.vocab = List[String](capacity=vocab_size)
+        self.vocab = Vocabulary(capacity=vocab_size)
         self.token_bytes = List[UInt8]()
         self.token_offsets = List[Int](capacity=vocab_size + 1)
         self.token_lengths = List[Int](capacity=vocab_size)
@@ -906,7 +907,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](Sized & Movable & Writable
                 max_id = rank
 
         var new_vocab_size = max_id + 1
-        var new_vocab = List[String](capacity=new_vocab_size)
+        var new_vocab = Vocabulary(capacity=new_vocab_size)
         var new_token_bytes = List[UInt8]()
         var new_token_offsets = List[Int](capacity=new_vocab_size + 1)
         var new_token_lengths = List[Int](capacity=new_vocab_size)

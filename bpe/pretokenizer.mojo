@@ -442,8 +442,6 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
     0x9F, 0xA0, 0xAD,  # rank 253-255
 )
 
-from std.format import Writable, Writer
-
 trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     """Split raw text into "words" for BPE training and encoding.
 
@@ -451,11 +449,6 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     of BPETokenizer[PT: PreTokenizer].  The split method is called
     during both train() and encode() to divide the input text into the
     atomic units that the BPE merge algorithm operates on.
-
-    Requirements:
-      - Movable (can be transferred with ^)
-      - Defaultable (can be default-constructed)
-      - ImplicitlyDeletable (drop is trivial -- no manual cleanup)
 
     An implementation must provide:
 
