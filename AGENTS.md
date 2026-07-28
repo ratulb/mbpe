@@ -10,7 +10,8 @@ All via `pixi run` or inside `pixi shell`:
   - `main.mojo` = 36 tests (uses `TestSuite.discover_tests`)
   - `tests/test_tokenizer.mojo` = 9
   - `tests/exhaustive_tokenizer.mojo` = 33
-- **Benchmark (full suite)**: `bash benchmarks/run.sh > results.md` — 4 implementations (Mojo, Python tiktoken, mbpe Python bindings, Rust tiktoken-rs) × 6 corpora. Stdout = clean markdown report, stderr = progress.
+- **Benchmark (full suite)**: `bash benchmarks/run.sh > results.md` — 4 implementations (Mojo, Python tiktoken, mbpe Python bindings, Rust tiktoken-rs) × 6 corpora. Stdout = clean markdown report, stderr = progress. Also writes JSON results to `benchmarks/results/`.
+- **Update README tables** (from cached data): `bash scripts/update_readme_benchmarks.sh` — reads `benchmarks/results/{native,mbpe,tiktoken,tiktoken-rs,training}.json`, regenerates the three per-encoding tables + training table in README.md. No benchmark runs. Run `bash benchmarks/run.sh` first if data is stale or missing.
 - **Quick benchmark** (1MB corpus, mbpe with 3 iters): `bash benchmarks/quick_bench.sh > results.md`
   - `pixi run benchmark` / `benchmark-gpt2` / `benchmark-gpt4` are aliases (all run `run.sh`)
   - `BPE_CORPUS` overrides corpus path (default: `benchmarks/corpus.txt`)

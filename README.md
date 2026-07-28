@@ -164,38 +164,36 @@ Module-level functions:
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **5.4** | **72.9** |
-| mbpe — Python bindings | 1.54M | 3.9 | 45.3 |
-| tiktoken (Python) | 1.54M | 2.9 | 27.9 |
-| tiktoken-rs | 1.53M | 2.6 | 55.4 |
+| **mbpe — Mojo native** | 1.54M | **5.7** | **75.5** |
+| mbpe — Python bindings | 1.54M | 4.1 | 46.2 |
+| tiktoken (Python) | 1.54M | 2.7 | 27.9 |
+| tiktoken-rs | 1.53M | 2.6 | 54.0 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **4.6** | **68.0** |
-| mbpe — Python bindings | 1.28M | 3.5 | 40.7 |
-| tiktoken (Python) | 1.28M | 2.5 | 28.9 |
-| tiktoken-rs | 1.28M | 2.5 | 51.6 |
+| **mbpe — Mojo native** | 1.28M | **4.8** | **65.4** |
+| mbpe — Python bindings | 1.28M | 3.6 | 43.1 |
+| tiktoken (Python) | 1.28M | 2.4 | 28.9 |
+| tiktoken-rs | 1.28M | 2.5 | 52.2 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | 4.4 | **68.2** |
-| mbpe — Python bindings | 1.28M | 3.1 | 40.3 |
-| tiktoken (Python) | 1.28M | 3.8 | 26.6 |
-| tiktoken-rs | 1.28M | **4.2** | 44.9 |
-
-> On o200k, `tiktoken-rs` edges out encode speed (4.2 vs. 4.4 M tok/s is within noise, but reported as-is); `mbpe` Mojo native still leads decode by a wide margin.
+| **mbpe — Mojo native** | 1.28M | **4.0** | **66.1** |
+| mbpe — Python bindings | 1.28M | 3.0 | 41.2 |
+| tiktoken (Python) | 1.28M | 3.6 | 27.2 |
+| tiktoken-rs | 1.28M | 3.9 | 45.9 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 5072 ms | 11557 ms | 22507 ms | 43178 ms |
-| Merges/s | 48 | 64 | 77 | 86 |
-| Encode (M tok/s) | 9.8 | 7.5 | 6.3 | 5.5 |
+| Train time | 4977 ms | 11304 ms | 22830 ms | 43322 ms |
+| Merges/s | 49 | 65 | 76 | 86 |
+| Encode (M tok/s) | 9.9 | 7.4 | 6.2 | 5.6 |
 
 *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
