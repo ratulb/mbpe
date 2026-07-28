@@ -318,7 +318,7 @@ def test_property_merge_ranks_strictly_increasing() raises:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_vocab_size_below_byte_range_raises_valueerror() raises:
-    """vocab_size < 256 must raise — can't hold base byte vocabulary."""
+    """V(v)ocab_size < 256 must raise — can't hold base byte vocabulary."""
     var corpus = List[String]()
     corpus.append(String("hello"))
     var raised = False
@@ -335,7 +335,7 @@ def test_vocab_size_below_byte_range_raises_valueerror() raises:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_train_vocab_size_smaller_than_initial_raises_valueerror() raises:
-    """vocab_size < base alphabet (256) raises before any training work."""
+    """V(v)ocab_size < base alphabet (256) raises before any training work."""
     var corpus = List[String]()
     corpus.append(String("hello world"))
     var raised = False
