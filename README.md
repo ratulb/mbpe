@@ -281,6 +281,6 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 
 ## Related projects
 
-- [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python)
-- [minbpe](https://github.com/karpathy/minbpe) — Minimal BPE in pure Python
-- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
+- [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python); the format and API mbpe is compatible with
+- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken; see [Benchmarks](#benchmarks) for a head-to-head
+- [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
