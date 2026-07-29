@@ -235,11 +235,11 @@ At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of t
 ## Design highlights
 
 - Compile-time `PreTokenizer` trait
-- O(1) merge lookup (`MergeLookup`)
-- Incremental pair statistics for training
+- MergeLookup lookup - two-tier merge lookup - (flat array + Dict)
+- Incremental pair statistics for training - (O(N) vs O(V×W))
 - Flat memcpy-chain decoder
 - Byte-level, lossless vocabulary
-
+  
 ---
 
 ## Development
@@ -266,6 +266,43 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 
 ---
 
+## API
+
+| Python class | Mojo backend | Pre-tokenizer | `name()` |
+|---|---|---|---|
+| `GPreTokenizer` | `BPETokenizer[GPreTokenizer]` | Ġ (space → U+0120 + split) | `"gpre"` |
+| `GPT2Tokenizer` | `BPETokenizer[GPT2Pretokenizer]` | r50k_base regex (7 patterns) | `"gpt2"` |
+| `GPT4Tokenizer` | `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base regex (8 patterns) | `"cl100k"` |
+| `GPT4oTokenizer` | `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base regex (8 patterns, shuffled byte mapping) | `"o200k"` |
+
+All four classes share the same method interface:
+
+| Method | Description |
+|---|---|
+| `train(texts, vocab_size)` | Train BPE from scratch |
+| `encode(text, **kwargs)` | Encode with special token handling |
+| `encode_ordinary(text)` | Encode ignoring special tokens |
+| `decode(ids)` | Decode token IDs to string |
+| `decode_bytes(ids)` | Decode to raw `bytes` |
+| `decode_single_token_bytes(id)` | Raw bytes for one token |
+| `decode_with_offsets(ids)` | `(text, [(start, end), ...])` — decoded text with byte offsets per token |
+| `encode_single_token(text)` | Look up a token string's ID |
+| `token_byte_values()` | Raw bytes for all token IDs |
+| `name()` | Pre-tokenizer name |
+| `n_vocab` (property) | Vocabulary size |
+| `save_tiktoken(path)` | Save in .tiktoken format |
+| `load_tiktoken(path)` | Load from .tiktoken file |
+| `register_special_tokens(dict)` | Register special tokens |
+
+Module-level functions:
+
+| Function | Description |
+|---|---|
+| `get_encoding(name)` | Load pre-trained encoding (gpt2, cl100k, o200k) |
+| `train(texts, vocab_size)` | Train with GPreTokenizer (default) |
+| `_train_impl(texts, vocab_size, pt)` | Train with specific pre-tokenizer |
+
+---
 ## Roadmap
 
 - Resume BPE training from existing vocabularies
