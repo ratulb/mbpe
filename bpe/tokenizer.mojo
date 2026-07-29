@@ -541,7 +541,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         if text.byte_length() == 0:
             return List[Int]()
         # ---- 1. Pre-tokenise into words ---------------------------------
-        var words = self.pt.split(text)
+        ref words = self.pt.split(text)
         # ---- 2. Compute total bytes for a single allocation -------------
         var total_bytes = 0
         for word in words:
@@ -634,7 +634,6 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                     if found_at >= 0 and found_at < next_special:
                         next_special = found_at
                 if next_special > start:
-                    #var seg = String(from_utf8_lossy=bytes[start:next_special])
                     var seg = StringSlice(unsafe_from_utf8=bytes[start:next_special])
                     for id in self.encode_ordinary(seg):
                         result.append(id)
@@ -642,7 +641,6 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                 elif next_special == start:
                     pos += 1
                 else:
-                    #var seg = String(from_utf8_lossy=bytes[start:n])
                     var seg = StringSlice(unsafe_from_utf8=bytes[start:n])
                     for id in self.encode_ordinary(seg):
                         result.append(id)
