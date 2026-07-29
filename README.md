@@ -128,70 +128,36 @@ print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 
 ---
 
-## API
+### Mojo native: 
 
-| Python class | Mojo backend | Pre-tokenizer | `name()` |
-|---|---|---|---|
-| `GPreTokenizer` | `BPETokenizer[GPreTokenizer]` | Ġ (space → U+0120 + split) | `"gpre"` |
-| `GPT2Tokenizer` | `BPETokenizer[GPT2Pretokenizer]` | r50k_base regex (7 patterns) | `"gpt2"` |
-| `GPT4Tokenizer` | `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base regex (8 patterns) | `"cl100k"` |
-| `GPT4oTokenizer` | `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base regex (8 patterns, shuffled byte mapping) | `"o200k"` |
+### Decode
 
-All four classes share the same method interface:
-
-| Method | Description |
-|---|---|
-| `train(texts, vocab_size)` | Train BPE from scratch |
-| `encode(text, **kwargs)` | Encode with special token handling |
-| `encode_ordinary(text)` | Encode ignoring special tokens |
-| `decode(ids)` | Decode token IDs to string |
-| `decode_bytes(ids)` | Decode to raw `bytes` |
-| `decode_single_token_bytes(id)` | Raw bytes for one token |
-| `decode_with_offsets(ids)` | `(text, [(start, end), ...])` — decoded text with byte offsets per token |
-| `encode_single_token(text)` | Look up a token string's ID |
-| `token_byte_values()` | Raw bytes for all token IDs |
-| `name()` | Pre-tokenizer name |
-| `n_vocab` (property) | Vocabulary size |
-| `save_tiktoken(path)` | Save in .tiktoken format |
-| `load_tiktoken(path)` | Load from .tiktoken file |
-| `register_special_tokens(dict)` | Register special tokens |
-
-Module-level functions:
-
-| Function | Description |
-|---|---|
-| `get_encoding(name)` | Load pre-trained encoding (gpt2, cl100k, o200k) |
-| `train(texts, vocab_size)` | Train with GPreTokenizer (default) |
-| `_train_impl(texts, vocab_size, pt)` | Train with specific pre-tokenizer |
-
----
-
-### Mojo (native)
-
-| Struct | Usage | Pre-tokenizer |
-|---|---|---|
-| `Tokenizers.get[Tokenizers.gpt2]()` | `→ BPETokenizer[GPT2Pretokenizer]` | r50k_base |
-| `Tokenizers.get[Tokenizers.cl100k]()` | `→ BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base |
-| `Tokenizers.get[Tokenizers.o200k]()` | `→ BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base |
+BPETokenizer[PT] / Tokenizers.get[PT] → returns comptime parameterized tokenizer. Loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`
 
 ```mojo
+
 from bpe.tokenizer import Tokenizers
 
-def example() raises:
-    var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
-    var ids = gpt2.encode("hello world")
-    print(gpt2.decode(ids))
-```
+var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
+var ids = gpt2.encode("hello world")
+print(gpt2.decode(ids))
 
-`Tokenizers.get[]` loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`. To train, parameterize `BPETokenizer` directly:
+```
+### Train:
 
 ```mojo
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import GPT2Pretokenizer
 
 var tok = BPETokenizer[GPT2Pretokenizer]()
-tok.train(Span[String](["hello world"]), 300)
+tok.train((["hello world"]), 300)
 ```
+
+### comptime aliases:
+
+- `Tokenizers.get[Tokenizers.gpt2]()`  → `BPETokenizer[GPT2Pretokenizer]` → r50k_base
+- `Tokenizers.get[Tokenizers.cl100k]()` → `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` → cl100k_base
+- `Tokenizers.get[Tokenizers.o200k]()`  → `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` → o200k_base
 
 ---
 
@@ -242,20 +208,20 @@ tok.train(Span[String](["hello world"]), 300)
 
 ## Architecture
 
-**`BPETokenizer[PT]`** / **`Tokenizers.get[]`** — parameterized by pre-tokenizer type at compile time. The `Tokenizers` struct provides convenient comptime aliases:
+                                                     Text
+                                                      │
+                                                      ▼
+                                              PreTokenizer (trait)
+                                                      │
+                                                      ▼
+                                                Word sequence
+                                                      │
+                                                      ▼
+                                                BPETokenizer[PT]
+                                              ┌────────┴─────────┐
+                                              ▼                  ▼
+                                          Training          Encode/Decode
 
-- `Tokenizers.gpt2` → `GPT2Pretokenizer`
-- `Tokenizers.cl100k` → `GPT4Pretokenizer[ByteMapping.SEQUENTIAL]`
-- `Tokenizers.o200k` → `GPT4Pretokenizer[ByteMapping.SHUFFLED]`
-
-Use `Tokenizers.get[Tokenizers.gpt2]()` to load a pre-built encoding from its `.tiktoken` file.
-
-- **Byte-level base vocabulary** — all 256 byte values (0x00–0xFF), no UNK token. Every valid UTF-8 input is losslessly representable.
-- **GPT-2 `bytes_to_unicode`** — printable bytes map to themselves; control/whitespace bytes map to unused Unicode codepoints ≥ 256.
-- **MergeLookup** — two-tier merge lookup: a flat 1024×1024 Byte array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Transforms sequential rule application into O(1) rank-based lookup — 3× encode speedup vs. naive scanning.
-- **Incremental pair stats** — during training, only 5 pair updates per merge occurrence instead of a full corpus rescan (O(N) vs O(V×W)).
-- **Memcpy decode** — pre-computed flat byte array with token offsets enables bulk memcpy for decode.
-- **3 pre-tokenizer families** (o200k reuses cl100k's with shuffled byte mapping): Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
 
 ---
 
@@ -283,8 +249,12 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 
 ---
 
-## Related projects
 
-- [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python); the format and API mbpe is compatible with
-- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken; see [Benchmarks](#benchmarks) for a head-to-head
-- [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
+## Project goals
+
+- Compatibility with OpenAI tiktoken
+-  Train from scratch
+-  Extensibility
+
+---
+
