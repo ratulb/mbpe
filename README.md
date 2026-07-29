@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
-**A from-scratch BPE tokenizer in Mojo that outruns `tiktoken-rs` — a compiled Rust implementation — on every encode/decode benchmark across all three OpenAI encodings.** Drop-in compatible with [`tiktoken`](https://github.com/openai/tiktoken): same API, same `.tiktoken` file format, same output.
+**A tiktoken-compatible BPE tokenizer, written from scratch in Mojo.** Drop-in replacement for OpenAI's `tiktoken`, with native encode/decode up to 2× faster — plus training, custom pre-tokenizers, and a Python API that matches `tiktoken`'s almost method-for-method.
 
 ```python
 import mbpe
@@ -17,11 +17,11 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 ## Why mbpe?
 
-- **Beats Rust, not just Python.** Mojo native leads or ties `tiktoken-rs` on both encode and decode across gpt2, cl100k, and o200k — up to 2× on decode. See [Benchmarks](#benchmarks) for the full table, including the one case where the margin narrows.
-- **Drop-in for `tiktoken`.** Same `get_encoding()`, same `encode()` / `allowed_special` / `disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
-- **Train your own.** `tokenizer.train(["hello world"], vocab_size=300)` — from scratch, saved straight to `.tiktoken` format.
-- **Extensible by design.** Pre-tokenizers are a Mojo trait, not a hardcoded switch. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
-- **Byte-level, lossless.** All 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
+- **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
+- **Fast where it counts** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three stock encodings; Python bindings beat Python `tiktoken` on gpt2 and cl100k. See [Benchmarks](#benchmarks) for the full picture, including where the margins are closer.
+- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, from scratch, saved straight to `.tiktoken` format.
+- **Extensible by design** — pre-tokenizers are a Mojo trait, not hardcoded. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
+- **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
 ---
 
@@ -39,7 +39,7 @@ Linux x86_64 only (Mojo runtime bundled). Requires Python ≥ 3.9.
 pixi add mbpe --channel https://repo.prefix.dev/modular-community
 ```
 
-Requires `mojo-compiler >=1.0.0b2`. `.tiktoken` data files are auto-discovered when the environment is activated (via `MBPE_DATA_DIR`). Set this env var manually if using outside conda.
+Requires `mojo-compiler >=1.0.0b2`. The `.tiktoken` data files are auto-discovered when the environment is activated (via `MBPE_DATA_DIR`). Set this env var manually if using outside conda.
 
 ---
 
@@ -162,6 +162,8 @@ Module-level functions:
 | `train(texts, vocab_size)` | Train with GPreTokenizer (default) |
 | `_train_impl(texts, vocab_size, pt)` | Train with specific pre-tokenizer |
 
+---
+
 ### Mojo (native)
 
 | Struct | Usage | Pre-tokenizer |
@@ -179,7 +181,7 @@ def example() raises:
     print(gpt2.decode(ids))
 ```
 
-`Tokenizers.get[]` loads from `.tiktoken` files located via `MBPE_DATA_DIR`, falling back to `./data/`. To train, parameterize `BPETokenizer` directly:
+`Tokenizers.get[]` loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`. To train, parameterize `BPETokenizer` directly:
 
 ```mojo
 from bpe.tokenizer import BPETokenizer
@@ -193,11 +195,9 @@ tok.train(Span[String](["hello world"]), 300)
 
 ## Benchmarks
 
-5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
+5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies. **Bold** marks the fastest implementation in each column. `mbpe` shows up twice per table — once as the pure Mojo binary, once through its Python bindings — so those two rows are labeled explicitly below rather than left as a bare "Mojo native."
 
-**The headline: Mojo native beats `tiktoken-rs` — Rust, not Python — on every row, both encode and decode, across all three encodings.** On decode specifically, the margin is 2–3.6×. The Python bindings beat Python `tiktoken` on gpt2 and cl100k outright; on o200k, `tiktoken` and `tiktoken-rs` pull ahead on encode while `mbpe` still leads decode. That one exception is left in rather than trimmed — a partial win reported honestly says more than a clean sweep that doesn't hold up under scrutiny.
-
-`mbpe` appears twice per table: once as the pure Mojo binary, once through its Python bindings. **Bold** marks the fastest implementation in each column.
+**Mojo native leads or ties every row on both encode and decode.** The Python bindings beat or match Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` and `tiktoken-rs` are competitive on encode while `mbpe` still leads decode — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
 
 #### gpt2 (r50k_base)
 
@@ -226,7 +226,7 @@ tok.train(Span[String](["hello world"]), 300)
 | tiktoken (Python) | 1.28M | 3.6 | 26.3 |
 | tiktoken-rs | 1.28M | 4.0 | 45.1 |
 
-**Training throughput** (Mojo, self-trained, GPT4Pretokenizer, 5 MB corpus):
+**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
@@ -240,7 +240,7 @@ tok.train(Span[String](["hello world"]), 300)
 
 ## Architecture
 
-**`BPETokenizer[PT]`** / **`Tokenizers.get[]`** — parameterized by pre-tokenizer type at compile time. The `Tokenizers` struct provides comptime aliases:
+**`BPETokenizer[PT]`** / **`Tokenizers.get[]`** — parameterized by pre-tokenizer type at compile time. The `Tokenizers` struct provides convenient comptime aliases:
 
 - `Tokenizers.gpt2` → `GPT2Pretokenizer`
 - `Tokenizers.cl100k` → `GPT4Pretokenizer[ByteMapping.SEQUENTIAL]`
@@ -248,14 +248,12 @@ tok.train(Span[String](["hello world"]), 300)
 
 Use `Tokenizers.get[Tokenizers.gpt2]()` to load a pre-built encoding from its `.tiktoken` file.
 
-Four design choices account for the numbers above:
-
-- **Byte-level base vocabulary.** All 256 byte values (0x00–0xFF), no UNK token. Every valid UTF-8 input is losslessly representable.
-- **GPT-2 `bytes_to_unicode`.** Printable bytes map to themselves; control/whitespace bytes map to unused Unicode codepoints ≥ 256.
-- **MergeLookup.** Two-tier merge lookup: a flat 1024×1024 byte array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Turns sequential rule application into O(1) rank-based lookup — a 3× encode speedup over naive scanning.
-- **Incremental pair stats.** During training, only 5 pair updates per merge occurrence instead of a full corpus rescan (O(N) vs. O(V×W)).
-- **Memcpy decode.** A pre-computed flat byte array with token offsets enables bulk memcpy for decode — the largest single factor in the decode-speed gap above.
-- **3 pre-tokenizer families** (o200k reuses cl100k's with a shuffled byte mapping): Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
+- **Byte-level base vocabulary** — all 256 byte values (0x00–0xFF), no UNK token. Every valid UTF-8 input is losslessly representable.
+- **GPT-2 `bytes_to_unicode`** — printable bytes map to themselves; control/whitespace bytes map to unused Unicode codepoints ≥ 256.
+- **MergeLookup** — two-tier merge lookup: a flat 1024×1024 Byte array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Transforms sequential rule application into O(1) rank-based lookup — 3× encode speedup vs. naive scanning.
+- **Incremental pair stats** — during training, only 5 pair updates per merge occurrence instead of a full corpus rescan (O(N) vs O(V×W)).
+- **Memcpy decode** — pre-computed flat byte array with token offsets enables bulk memcpy for decode.
+- **3 pre-tokenizer families** (o200k reuses cl100k's with shuffled byte mapping): Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
 
 ---
 
@@ -288,4 +286,3 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 - [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python); the format and API mbpe is compatible with
 - [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken; see [Benchmarks](#benchmarks) for a head-to-head
 - [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
-
