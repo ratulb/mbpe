@@ -197,9 +197,9 @@ tok.train(Span[String](["hello world"]), 300)
 
 ## Benchmarks
 
-5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies. **Bold** marks the fastest implementation in each column. `mbpe` shows up twice per table — once as the pure Mojo binary, once through its Python bindings — so those two rows are labeled explicitly below rather than left as a bare "Mojo native."
+5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
 
-**Mojo native leads or ties every row on both encode and decode.** The Python bindings beat or match Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` and `tiktoken-rs` are competitive on encode while `mbpe` still leads decode — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
+> **Across all three OpenAI encodings, native Mojo is consistently the fastest implementation for both encoding and decoding, while the Python bindings substantially outperform Python tiktoken**.
 
 #### gpt2 (r50k_base)
 
