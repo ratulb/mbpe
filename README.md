@@ -232,6 +232,16 @@ At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of t
 
 ---
 
+## Design highlights
+
+- Compile-time `PreTokenizer` trait
+- O(1) merge lookup (`MergeLookup`)
+- Incremental pair statistics for training
+- Flat memcpy-chain decoder
+- Byte-level, lossless vocabulary
+
+---
+
 ## Development
 
 ```bash
