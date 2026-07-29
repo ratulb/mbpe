@@ -3,7 +3,7 @@
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
 A **high-performance**, **trainable**, **tiktoken-compatible BPE tokenizer** written in **Mojo**.
-Compile-time PreTokenizer trait enable **GPT-2, GPT-4, GPT-4o** and custom tokenization pipelines without changing the core tokenizer.
+The compile-time `PreTokenizer` trait enables **GPT-2, GPT-4, GPT-4o** and custom tokenization pipelines without changing the core tokenizer.
 
 ```python
 import mbpe
@@ -20,9 +20,9 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 - **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
 - **Fast** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three encodings. See [Benchmarks](#benchmarks) 
-- **Fast Python bindings** - Substantially **outperform** Python tiktoken and **match or exceed** tiktoken-rs across the supported OpenAI encodings.
+- **Fast Python bindings** - Substantially outperform Python `tiktoken` and match or exceed `tiktoken-rs` across the supported OpenAI encodings.
 - **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, then save directly to `.tiktoken` format.
-- **Extensible by design** — pre-tokenizers are a **Mojo trait, not hardcoded**. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
+- **Extensible by design** — `PreTokenizer` is a Mojo trait, not a hardcoded implementation. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
 - **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
 ---
@@ -75,7 +75,7 @@ tokenizer.train(corpus, vocab_size=300)
 print(tokenizer.encode("the cat sat"))            # [259, 270, 265]
 tokenizer.save_tiktoken("my_tokenizer.tiktoken")
 
-# Or train with a GPT-4-style pre-tokenizer
+# Or train with a GPT-4-style `PreTokenizer`
 tokenizer = mbpe.GPT4Tokenizer()
 tokenizer.train(corpus, vocab_size=300)
 ```
@@ -130,7 +130,7 @@ print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 
 ### Mojo API: 
 
-### Decode
+### Load an encoding
 
 BPETokenizer[PT] / Tokenizers.get[PT] → returns comptime parameterized tokenizer. Loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`
 
@@ -203,12 +203,12 @@ tok.train((["hello world"]), 300)
 
 ## Architecture
 
-At the core of mbpe is BPETokenizer[PT] where PT is any implementation of the compile-time PreTokenizer trait.
+At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of the compile-time `PreTokenizer` trait.
 
                                                      Text
                                                       │
                                                       ▼
-                                              PreTokenizer (trait)
+                                              PreTokenizer(trait)
                                                       │
                                                       ▼
                                                 Symbol Sequence
@@ -218,6 +218,9 @@ At the core of mbpe is BPETokenizer[PT] where PT is any implementation of the co
                                               ┌────────┴─────────┐
                                               ▼                  ▼
                                           Training          Encode/Decode
+
+
+> A `PreTokenizer` converts input text into a sequence of symbols (e.g. regex chunks, Ġ-prefixed words, or future custom segmentations) before BPE merging begins.                                          
 
 
 ### comptime aliases:
