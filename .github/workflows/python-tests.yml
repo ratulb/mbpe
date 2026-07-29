@@ -1,4 +1,4 @@
-name: Python tests
+name: Tests
 on: [push, pull_request]
 jobs:
   test:
@@ -13,7 +13,13 @@ jobs:
         run: pixi install --environment dev
       - name: Build Mojo shared library
         run: pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
-      - name: Run tests
+      - name: Python tests
         run: pixi run --environment dev python -m pytest tests/python/ -v --tb=short
-      - name: Coverage
+      - name: Python coverage
         run: pixi run --environment dev python -m pytest tests/python/ --cov=mbpe --cov-report=term-missing
+      - name: Mojo tests (main)
+        run: pixi run mojo main.mojo
+      - name: Mojo tests (tokenizer)
+        run: pixi run mojo -I . tests/test_tokenizer.mojo
+      - name: Mojo tests (exhaustive)
+        run: pixi run mojo -I . tests/exhaustive_tokenizer.mojo
