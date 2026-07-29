@@ -15,10 +15,10 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 ## Why mbpe?
 
-- **Drop-in for `tiktoken`** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
-- **Fast where it counts** — Mojo native beats `tiktoken-rs` (Rust) on both encode and decode across all three stock encodings; Python bindings beat Python `tiktoken` on gpt2 and cl100k. See [Benchmarks](#benchmarks) for the full picture, including where the margins are closer.
+- **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
+- **Fast where it counts** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three stock encodings; Python bindings beat Python `tiktoken` on gpt2 and cl100k. See [Benchmarks](#benchmarks) for the full picture, including where the margins are closer.
 - **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, from scratch, saved straight to `.tiktoken` format.
-- **Extensible by design** — pre-tokenizers are a Mojo trait, not a hardcoded switch. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
+- **Extensible by design** — pre-tokenizers are a Mojo trait, not hardcoded. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
 - **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
 ---
@@ -251,7 +251,7 @@ Use `Tokenizers.get[Tokenizers.gpt2]()` to load a pre-built encoding from its `.
 - **MergeLookup** — two-tier merge lookup: a flat 1024×1024 Byte array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Transforms sequential rule application into O(1) rank-based lookup — 3× encode speedup vs. naive scanning.
 - **Incremental pair stats** — during training, only 5 pair updates per merge occurrence instead of a full corpus rescan (O(N) vs O(V×W)).
 - **Memcpy decode** — pre-computed flat byte array with token offsets enables bulk memcpy for decode.
-- **3 pre-tokenizers**: Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
+- **3 pre-tokenizer families** (o200k reuses cl100k's with shuffled byte mapping): Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
 
 ---
 
