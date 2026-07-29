@@ -2,7 +2,8 @@
 
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
-A **high-performance**, **trainable**, **tiktoken-compatible BPE tokenizer** written in **Mojo**, featuring compile-time configurable pre-tokenizers and native training, encoding, and decoding.
+A **high-performance**, **trainable**, **tiktoken-compatible BPE tokenizer** written in **Mojo**.
+Compile-time configurable pre-tokenizers enable **GPT-2, GPT-4, GPT-4o** and custom tokenization pipelines without changing the core tokenizer.
 
 ```python
 import mbpe
