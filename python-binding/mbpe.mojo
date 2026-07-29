@@ -26,10 +26,12 @@ comptime GPT4oTK = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]
 # ── Helpers ──────────────────────────────────────────────────────
 
 def _list_of_int_to_py(ids: List[Int]) raises -> PythonObject:
-    var py_vals = List[PythonObject](capacity=len(ids))
-    for i in range(len(ids)):
-        py_vals.append(Python.int(ids[i]))
-    return Python.list(Span[PythonObject](py_vals))
+    var n = len(ids)
+    ref cpy = Python().cpython()
+    var list_ptr = cpy.PyList_New(n)
+    for i in range(n):
+        _ = cpy.PyList_SetItem(list_ptr, i, cpy.PyLong_FromSsize_t(ids[i]))
+    return PythonObject(from_owned=list_ptr)
 
 
 def _py_dict_to_mojo(py_dict: PythonObject) raises -> Dict[String, Int]:
@@ -97,16 +99,20 @@ def _decode_bytes_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -
     return _uint8_list_to_py_bytes(ptr[].decode_bytes(Span[Int](_py_ids_to_mojo(args[0]))))
 
 def _encode_single_token_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    return PythonObject(self.downcast_value_ptr[GPreTK]()[].encode_single_token(String(args[0])))
+    var ptr = self.downcast_value_ptr[GPreTK]()
+    return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
 
 def _encode_single_token_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    return PythonObject(self.downcast_value_ptr[GPT2TK]()[].encode_single_token(String(args[0])))
+    var ptr = self.downcast_value_ptr[GPT2TK]()
+    return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
 
 def _encode_single_token_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    return PythonObject(self.downcast_value_ptr[GPT4TK]()[].encode_single_token(String(args[0])))
+    var ptr = self.downcast_value_ptr[GPT4TK]()
+    return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
 
 def _encode_single_token_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    return PythonObject(self.downcast_value_ptr[GPT4oTK]()[].encode_single_token(String(args[0])))
+    var ptr = self.downcast_value_ptr[GPT4oTK]()
+    return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
 
 def _token_byte_values_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args
