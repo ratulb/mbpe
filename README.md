@@ -1,6 +1,6 @@
 # mbpe
 
-[![Tests](https://github.com/tenmoomnet/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/tenmoomnet/mbpe/actions/workflows/python-tests.yml)
+[![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
 **A tiktoken-compatible BPE tokenizer, written from scratch in Mojo.** Drop-in replacement for OpenAI's `tiktoken`, with native encode/decode up to 2× faster — plus training, custom pre-tokenizers, and a Python API that matches `tiktoken`'s almost method-for-method.
 
