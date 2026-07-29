@@ -901,7 +901,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
 
     An implementation must provide:
 
-        def split(self, text: String) raises -> List[String]:
+        def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
             ...
 
     The returned list contains UTF-8 string slices, one per "word".
@@ -946,7 +946,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         """
         return rank
 
-    def split(self, text: String) raises -> List[String]:
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
         """Split text into words according to this pre-tokenizer's rules.
 
         Args:
@@ -1115,15 +1115,7 @@ struct GPreTokenizer(PreTokenizer):
             result.append(String(from_utf8=split.as_bytes()))
         return result^
 
-    def split(self, text: String) raises -> List[String]:
-        """Split using the G convention (trait interface).
-
-        Args:
-            text: The raw input string.
-
-        Returns:
-            List of word strings.
-        """
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
         return Self.tokenize(text)
 
     def write_to[T: Writer](self, mut writer: T):
@@ -1355,7 +1347,7 @@ struct GPT2Pretokenizer(PreTokenizer):
             return m
         return Self.match_single_ws(span, pos)
 
-    def split(self, text: String) raises -> List[String]:
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
         """Split text into words using the GPT-2 r50k_base pattern.
 
         Iterates through the UTF-8 byte span left-to-right.  At each
@@ -1721,7 +1713,7 @@ struct GPT4Pretokenizer[
             return m
         return Self.match_single_ws(span, pos)
 
-    def split(self, text: String) raises -> List[String]:
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
         """Split text into words using the GPT-4 cl100k_base pattern.
 
         Iterates through the UTF-8 byte span left-to-right.  At each
