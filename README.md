@@ -252,14 +252,3 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 ```
 
 ---
-
-
-## Project goals
-
-- OpenAI tiktoken compatibility
--  Native Mojo performance
--  Trainable from scratch
--  Extensible tokenizer architecture
-
----
-
