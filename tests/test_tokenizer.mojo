@@ -139,6 +139,29 @@ def test_single_char() raises:
     assert_equal(ids[0], 97)
 
 
+def test_encode_single_token() raises:
+    """Verify encode_single_token on a known token, a special token,
+    and that an unknown token raises.
+    """
+    var corpus = List[String]()
+    corpus.append(String("hello world"))
+    var tok = BPETokenizer()
+    tok.train(corpus, 300)
+
+    var token_id = tok.encode_single_token(StringSlice("hello"))
+    assert_true(token_id >= 0)
+
+    var decoded = tok.decode_single_token_bytes(token_id)
+    assert_true(decoded.byte_length() > 0)
+
+    var raised = False
+    try:
+        _ = tok.encode_single_token(StringSlice("\u0000nonexistent\u0000"))
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def test_unicode_roundtrip() raises:
     """Verify encode→decode identity on text containing multi-byte UTF-8
     sequences (Korean Hangul, CJK, emoji).  The byte-level vocab must

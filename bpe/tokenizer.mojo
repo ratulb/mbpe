@@ -540,9 +540,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     ](self, text: StringSlice[origin]) raises -> List[Int]:
         if text.byte_length() == 0:
             return List[Int]()
-        # ---- 1. Pre-tokenise into words ---------------------------------
-        var text_str = String(from_utf8=text.as_bytes())
-        var words = self.pt.split(text_str)
+        # ---- 1. Pre-tokenise into words (zero-copy views) --------------
+        ref words = self.pt.split_view(text)
         # ---- 2. Compute total bytes for a single allocation -------------
         var total_bytes = 0
         for word in words:
@@ -635,14 +634,14 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                     if found_at >= 0 and found_at < next_special:
                         next_special = found_at
                 if next_special > start:
-                    var seg = String(from_utf8_lossy=bytes[start:next_special])
+                    var seg = StringSlice(unsafe_from_utf8=bytes[start:next_special])
                     for id in self.encode_ordinary(seg):
                         result.append(id)
                     pos = next_special
                 elif next_special == start:
                     pos += 1
                 else:
-                    var seg = String(from_utf8_lossy=bytes[start:n])
+                    var seg = StringSlice(unsafe_from_utf8=bytes[start:n])
                     for id in self.encode_ordinary(seg):
                         result.append(id)
                     pos = n
@@ -672,22 +671,19 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             total += lens[id]
         if total == 0:
             return String("")
-        var buf = alloc[Byte](total)
+        var result = String(unsafe_uninit_length=total)
+        var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
         var ptr = self.token_bytes.unsafe_ptr()
         var write_offset: Int = 0
         for id in ids:
             var n = lens[id]
             if n > 0:
                 memcpy(
-                    dest=buf + write_offset,
+                    dest=dst + write_offset,
                     src=ptr + offs[id],
                     count=n,
                 )
                 write_offset += n
-        var result = String(
-            from_utf8_lossy=Span[Byte](ptr=buf, length=write_offset)
-        )
-        buf.free()
         return result^
 
     def __len__(self) -> Int:
@@ -712,12 +708,15 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         if total == 0:
             return ByteSequence()
         var result = ByteSequence(capacity=total)
-        var ptr = self.token_bytes.unsafe_ptr()
+        result.resize(total, 0)
+        var dst = result.unsafe_ptr()
+        var src = self.token_bytes.unsafe_ptr()
+        var write_offset: Int = 0
         for id in ids:
             var n = lens[id]
             if n > 0:
-                for j in range(n):
-                    result.append(ptr[offs[id] + j])
+                memcpy(dest=dst + write_offset, src=src + offs[id], count=n)
+                write_offset += n
         return result^
 
     def decode_single_token_bytes(self, id: Int) raises -> ByteSequence:
@@ -729,8 +728,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         var off = self.token_offsets[id]
         var ptr = self.token_bytes.unsafe_ptr()
         var result = ByteSequence(capacity=n)
-        for j in range(n):
-            result.append(ptr[off + j])
+        result.resize(n, 0)
+        memcpy(dest=result.unsafe_ptr(), src=ptr + off, count=n)
         return result^
 
     def decode_with_offsets[
@@ -750,20 +749,17 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             total += lens[id]
         if total == 0:
             return String("")
-        var buf = alloc[Byte](total)
+        var result = String(unsafe_uninit_length=total)
+        var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
         var ptr = self.token_bytes.unsafe_ptr()
         var write_offset: Int = 0
         for id in ids:
             var n = lens[id]
             starts.append(write_offset)
             if n > 0:
-                memcpy(dest=buf + write_offset, src=ptr + offs[id], count=n)
+                memcpy(dest=dst + write_offset, src=ptr + offs[id], count=n)
                 write_offset += n
             ends.append(write_offset)
-        var result = String(
-            from_utf8_lossy=Span[Byte](ptr=buf, length=write_offset)
-        )
-        buf.free()
         return result^
 
     def token_byte_values(self) -> List[ByteSequence]:
@@ -774,19 +770,19 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         for i in range(len(self.token_lengths)):
             var n = lens[i]
             var bytes = ByteSequence(capacity=n)
-            for j in range(n):
-                bytes.append(ptr[offs[i] + j])
+            bytes.resize(n, 0)
+            memcpy(dest=bytes.unsafe_ptr(), src=ptr + offs[i], count=n)
             result.append(bytes^)
         return result^
 
-    def encode_single_token(self, text: String) raises -> Int:
+    def encode_single_token[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> Int:
         for item in self.special_bytes.items():
             if item.key == text:
                 return item.value
         for i in range(len(self.vocab)):
             if self.vocab[i] == text:
                 return i
-        raise Error("unknown token: " + text)
+        raise Error("unknown token: " + String(text))
 
     def write_to[T: Writer](self, mut writer: T):
         writer.write(
