@@ -309,3 +309,11 @@ Module-level functions:
 - Unicode-native tokenization through pluggable pre-tokenizers
 - Tokenizers specialized for new languages and domains
 
+---
+
+## Related projects
+
+- [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python); the format and API mbpe is compatible with
+- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
+- [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
+
