@@ -265,3 +265,10 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 ```
 
 ---
+
+## Roadmap
+
+- Resume BPE training from existing vocabularies
+- Unicode-native tokenization through pluggable pre-tokenizers
+- Tokenizers specialized for new languages and domains
+
