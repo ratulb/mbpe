@@ -3,7 +3,7 @@
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
 A **high-performance**, **trainable**, **tiktoken-compatible BPE tokenizer** written in **Mojo**.
-Compile-time configurable pre-tokenizers enable **GPT-2, GPT-4, GPT-4o** and custom tokenization pipelines without changing the core tokenizer.
+Compile-time PreTokenizer trait enable **GPT-2, GPT-4, GPT-4o** and custom tokenization pipelines without changing the core tokenizer.
 
 ```python
 import mbpe
@@ -20,8 +20,8 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 - **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
 - **Fast** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three encodings. See [Benchmarks](#benchmarks) 
-- **Fast Python bindings** - Python bindings substantially **outperform** Python tiktoken and **faster or match** `tiktoken-rs` as of the latest round of optimization.
-- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, from scratch, saved straight to `.tiktoken` format.
+- **Fast Python bindings** - Substantially **outperform** Python tiktoken and **match or exceed** tiktoken-rs across the supported OpenAI encodings.
+- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, then save directly to `.tiktoken` format.
 - **Extensible by design** — pre-tokenizers are a **Mojo trait, not hardcoded**. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
 - **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
@@ -128,7 +128,7 @@ print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 
 ---
 
-### Mojo native: 
+### Mojo API: 
 
 ### Decode
 
@@ -153,11 +153,6 @@ var tok = BPETokenizer[GPT2Pretokenizer]()
 tok.train((["hello world"]), 300)
 ```
 
-### comptime aliases:
-
-- `Tokenizers.get[Tokenizers.gpt2]()`  → `BPETokenizer[GPT2Pretokenizer]` → r50k_base
-- `Tokenizers.get[Tokenizers.cl100k]()` → `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` → cl100k_base
-- `Tokenizers.get[Tokenizers.o200k]()`  → `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` → o200k_base
 
 ---
 
@@ -208,19 +203,28 @@ tok.train((["hello world"]), 300)
 
 ## Architecture
 
+At the core of mbpe is BPETokenizer[PT] where PT is any implementation of the compile-time PreTokenizer trait.
+
                                                      Text
                                                       │
                                                       ▼
                                               PreTokenizer (trait)
                                                       │
                                                       ▼
-                                                Word sequence
+                                                Symbol Sequence
                                                       │
                                                       ▼
                                                 BPETokenizer[PT]
                                               ┌────────┴─────────┐
                                               ▼                  ▼
                                           Training          Encode/Decode
+
+
+### comptime aliases:
+
+- `Tokenizers.get[Tokenizers.gpt2]()`  → `BPETokenizer[GPT2Pretokenizer]` → r50k_base
+- `Tokenizers.get[Tokenizers.cl100k]()` → `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` → cl100k_base
+- `Tokenizers.get[Tokenizers.o200k]()`  → `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` → o200k_base
 
 
 ---
@@ -252,9 +256,10 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 
 ## Project goals
 
-- Compatibility with OpenAI tiktoken
--  Train from scratch
--  Extensibility
+- OpenAI tiktoken compatibility
+-  Native Mojo performance
+-  Trainable from scratch
+-  Extensible tokenizer architecture
 
 ---
 
