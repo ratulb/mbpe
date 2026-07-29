@@ -895,18 +895,28 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     """Split raw text into "words" for BPE training and encoding.
 
     Any struct implementing this trait can be used as the PT parameter
-    of BPETokenizer[PT: PreTokenizer].  The split method is called
-    during both train() and encode() to divide the input text into the
-    atomic units that the BPE merge algorithm operates on.
+    of BPETokenizer[PT: PreTokenizer].  The split methods divide the
+    input text into the atomic units that the BPE merge algorithm
+    operates on.
 
-    An implementation must provide:
+    The trait provides two entry points with different performance
+    characteristics:
 
-        def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
-            ...
+        split_view
+          Returns zero-copy StringSlice views into the original input.
+          No heap allocation per word.  Used by encode_ordinary() and
+          encode() — the hot path.
 
-    The returned list contains UTF-8 string slices, one per "word".
-    Each word will be encoded as a sequence of byte-level token IDs
-    (0-255) before BPE merge rules are applied.
+        split
+          Returns owned String copies.  Default implementation wraps
+          split_view into String allocations.  Used by train() where
+          words become Dict keys.
+
+    Pre-tokenizers that only slice the input (GPT-2 r50k_base, GPT-4
+    cl100k_base / o200k_base) override split_view for maximum encode
+    throughput.  Pre-tokenizers that transform the input (GPreTokenizer
+    with its Ġ spacer insertion) override split directly since their
+    output words are already freshly allocated.
 
     Byte mapping
     ------------
@@ -946,18 +956,41 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         """
         return rank
 
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
-        """Split text into words according to this pre-tokenizer's rules.
+    def split_view[mut: Bool, //, origin: Origin[mut=mut]](
+        self, text: StringSlice[origin]
+    ) raises -> List[StringSlice[origin]]:
+        """Split text into zero-copy word views.
 
-        Args:
-            text: The raw input string (valid UTF-8).
+        Returns views into the original ``text`` — no per-word heap
+        allocation.  The views are valid only for the lifetime of the
+        input ``text``.  Used by the encode hot path.
 
-        Returns:
-            A list of word strings.  Concatenating them in order
-            reconstructs the original text (the split is a partition
-            of the input byte span).
+        Default: return the entire input as a single word (correct for
+        pre-tokenizers that don't subdivide text — e.g., GPreTokenizer
+        transforms text, so it's not a pure slice).
+
+        Override in pre-tokenizers that slice the input (GPT2Pretokenizer,
+        GPT4Pretokenizer) for zero-allocation encode.
         """
-        ...
+        var result = List[StringSlice[origin]]()
+        result.reserve(1)
+        result.append(text)
+        return result^
+
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
+        """Split text into owned word strings.
+
+        Default implementation wraps split_view into String allocations.
+        Override directly when the pre-tokenizer transforms the input
+        (e.g., GPreTokenizer inserts spacers).
+
+        Used by train() where words become Dict keys.
+        """
+        var views = self.split_view(text)
+        var result = List[String](capacity=len(views))
+        for v in views:
+            result.append(String(v))
+        return result^
 
     @staticmethod
     def name() -> String:
@@ -1347,23 +1380,15 @@ struct GPT2Pretokenizer(PreTokenizer):
             return m
         return Self.match_single_ws(span, pos)
 
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
-        """Split text into words using the GPT-2 r50k_base pattern.
+    def split_view[mut: Bool, //, origin: Origin[mut=mut]](
+        self, text: StringSlice[origin]
+    ) raises -> List[StringSlice[origin]]:
+        """Split text into zero-copy word views (GPT-2 r50k_base).
 
-        Iterates through the UTF-8 byte span left-to-right.  At each
-        position, tries all 7 matchers via _best_match().  The first
-        matcher that returns a positive length wins.  If no matcher
-        matches (should not happen for valid UTF-8 text), falls back
-        to consuming a single codepoint.
-
-        Args:
-            text: The raw input string (valid UTF-8).
-
-        Returns:
-            A list of word strings whose concatenation reconstructs
-            the original text.
+        No per-word heap allocation — each entry is a view into the
+        original ``text`` input.
         """
-        var result = List[String]()
+        var result = List[StringSlice[origin]]()
         var n = text.byte_length()
         if n == 0:
             return result^
@@ -1374,8 +1399,15 @@ struct GPT2Pretokenizer(PreTokenizer):
             if best_len == 0:
                 best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]
-            result.append(String(from_utf8_lossy=byte_span))
+            result.append(StringSlice(unsafe_from_utf8=byte_span))
             pos += best_len
+        return result^
+
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
+        var views = self.split_view(text)
+        var result = List[String](capacity=len(views))
+        for v in views:
+            result.append(String(v))
         return result^
 
     def write_to[T: Writer](self, mut writer: T):
@@ -1713,23 +1745,15 @@ struct GPT4Pretokenizer[
             return m
         return Self.match_single_ws(span, pos)
 
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
-        """Split text into words using the GPT-4 cl100k_base pattern.
+    def split_view[mut: Bool, //, origin: Origin[mut=mut]](
+        self, text: StringSlice[origin]
+    ) raises -> List[StringSlice[origin]]:
+        """Split text into zero-copy word views (GPT-4 cl100k_base).
 
-        Iterates through the UTF-8 byte span left-to-right.  At each
-        position, tries all 8 matchers via _best_match().  The first
-        matcher that returns a positive length wins.  If no matcher
-        matches (should not happen for valid UTF-8 text), falls back
-        to consuming a single codepoint.
-
-        Args:
-            text: The raw input string (valid UTF-8).
-
-        Returns:
-            A list of word strings whose concatenation reconstructs
-            the original text.
+        No per-word heap allocation — each entry is a view into the
+        original ``text`` input.
         """
-        var result = List[String]()
+        var result = List[StringSlice[origin]]()
         var n = text.byte_length()
         if n == 0:
             return result^
@@ -1740,8 +1764,15 @@ struct GPT4Pretokenizer[
             if best_len == 0:
                 best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]
-            result.append(String(from_utf8_lossy=byte_span))
+            result.append(StringSlice(unsafe_from_utf8=byte_span))
             pos += best_len
+        return result^
+
+    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
+        var views = self.split_view(text)
+        var result = List[String](capacity=len(views))
+        for v in views:
+            result.append(String(v))
         return result^
 
     def write_to[T: Writer](self, mut writer: T):

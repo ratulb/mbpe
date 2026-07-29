@@ -540,8 +540,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     ](self, text: StringSlice[origin]) raises -> List[Int]:
         if text.byte_length() == 0:
             return List[Int]()
-        # ---- 1. Pre-tokenise into words ---------------------------------
-        ref words = self.pt.split(text)
+        # ---- 1. Pre-tokenise into words (zero-copy views) --------------
+        ref words = self.pt.split_view(text)
         # ---- 2. Compute total bytes for a single allocation -------------
         var total_bytes = 0
         for word in words:
