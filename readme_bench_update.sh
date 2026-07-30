@@ -18,10 +18,10 @@ echo "  1/5  Mojo native (pre-trained encode/decode only)..."
 BPE_CORPUS="$CORPUS" pixi run mojo -I . benchmarks/bm_pretrained.mojo > "$RESULTS/native.json"
 
 echo "  2/5  mbpe Python bindings..."
-BPE_CORPUS="$CORPUS" PYTHONPATH=python-binding /tmp/mbpe-bench-venv/bin/python benchmarks/benchmark_mbpe.py > "$RESULTS/mbpe.json"
+BPE_CORPUS="$CORPUS" PYTHONPATH=python-binding pixi run -e dev python benchmarks/benchmark_mbpe.py > "$RESULTS/mbpe.json"
 
 echo "  3/5  tiktoken (Python)..."
-BPE_CORPUS="$CORPUS" /tmp/mbpe-bench-venv/bin/python benchmarks/benchmark_tiktoken.py > "$RESULTS/tiktoken.json"
+BPE_CORPUS="$CORPUS" pixi run -e dev python benchmarks/benchmark_tiktoken.py > "$RESULTS/tiktoken.json"
 
 echo "  4/5  tiktoken-rs..."
 BPE_CORPUS="$CORPUS" cargo run --release --manifest-path benchmarks/benchmark_rust/Cargo.toml 2>/dev/null > "$RESULTS/tiktoken-rs.json"

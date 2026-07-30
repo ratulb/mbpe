@@ -166,36 +166,36 @@ tok.train((["hello world"]), 300)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **7.6** | **121.3** |
-| mbpe — Python bindings | 1.54M | 5.8 | 56.6 |
-| tiktoken (Python) | 1.54M | 2.9 | 27.2 |
-| tiktoken-rs | 1.53M | 2.6 | 52.2 |
+| **mbpe — Mojo native** | 1.54M | **7.7** | **120.2** |
+| mbpe — Python bindings | 1.54M | 6.0 | 59.4 |
+| tiktoken (Python) | 1.54M | 2.8 | 28.2 |
+| tiktoken-rs | 1.53M | 2.6 | 53.7 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **5.2** | **106.1** |
-| mbpe — Python bindings | 1.28M | 4.7 | 54.4 |
-| tiktoken (Python) | 1.28M | 2.4 | 29.1 |
-| tiktoken-rs | 1.28M | 2.5 | 51.3 |
+| **mbpe — Mojo native** | 1.28M | **5.4** | **115.0** |
+| mbpe — Python bindings | 1.28M | 4.8 | 54.5 |
+| tiktoken (Python) | 1.28M | 2.4 | 28.8 |
+| tiktoken-rs | 1.28M | 2.6 | 53.1 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **4.7** | **101.6** |
-| mbpe — Python bindings | 1.28M | 4.4 | 51.2 |
-| tiktoken (Python) | 1.28M | 3.7 | 26.9 |
-| tiktoken-rs | 1.28M | 3.9 | 44.6 |
+| **mbpe — Mojo native** | 1.28M | **5.1** | **110.2** |
+| mbpe — Python bindings | 1.28M | 4.6 | 54.5 |
+| tiktoken (Python) | 1.28M | 3.9 | 28.1 |
+| tiktoken-rs | 1.28M | 4.4 | 47.8 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 5137 ms | 11956 ms | 23586 ms | 44678 ms |
-| Merges/s | 47 | 62 | 73 | 83 |
-| Encode (M tok/s) | 10.8 | 7.8 | 6.7 | 5.7 |
+| Train time | 5072 ms | 11766 ms | 23133 ms | 44078 ms |
+| Merges/s | 48 | 63 | 75 | 84 |
+| Encode (M tok/s) | 11.2 | 8.2 | 6.6 | 6.1 |
 
 *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
