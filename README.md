@@ -205,6 +205,8 @@ tok.train((["hello world"]), 300)
 
 At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of the compile-time `PreTokenizer` trait.
 
+```
+
                                                      Text
                                                       │
                                                       ▼
@@ -219,7 +221,7 @@ At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of t
                                               ▼                  ▼
                                           Training          Encode/Decode
 
-
+```
 > A `PreTokenizer` converts input text into a sequence of symbols (e.g. regex chunks, Ġ-prefixed words, or future custom segmentations) before BPE merging begins.                                          
 
 
