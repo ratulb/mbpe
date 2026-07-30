@@ -264,6 +264,117 @@ def is_letter_or_digit(cp: Int) -> Bool:
 
 
 @always_inline
+def is_lowercase(cp: Int) -> Bool:
+    """Return True if cp is a Unicode lowercase letter (like \\p{Ll} in regex).
+
+    Covers ASCII lowercase, Latin extended, IPA, Cyrillic, Greek, and fullwidth.
+    Used by the o200k_base pre-tokenizer to distinguish case-sensitive letter runs.
+    """
+    # ASCII lowercase
+    if 0x0061 <= cp <= 0x007A:
+        return True
+    # Latin-1 Supplement lowercase
+    if 0x00AA == cp or 0x00B5 == cp or 0x00BA == cp:
+        return True
+    if 0x00DF <= cp <= 0x00F6:
+        return True
+    if 0x00F8 <= cp <= 0x00FF:
+        return True
+    # Latin Extended: odd codepoints = lowercase, even = uppercase
+    if 0x0100 <= cp <= 0x024F:
+        return (cp & 1) == 1
+    # IPA Extensions (all Ll)
+    if 0x0250 <= cp <= 0x02AF:
+        return True
+    # Greek: 0x03B1-0x03C9 alpha-omega lowercase, 0x03CE, 0x03D0-0x03E1, etc.
+    if 0x03B1 <= cp <= 0x03C9:
+        return True
+    if cp == 0x03CE:
+        return True
+    # Cyrillic lowercase: 0x0430-0x044F + extended
+    if 0x0430 <= cp <= 0x044F:
+        return True
+    if 0x0450 <= cp <= 0x04FF and ((cp - 0x0450) % 2 == 0 or cp == 0x0450):
+        return True
+    # Latin Extended Additional: odd = lowercase
+    if 0x1E00 <= cp <= 0x1EFF:
+        return (cp & 1) == 1
+    # Greek Extended: 0x1F00-0x1FFF — many lowercase forms
+    if 0x1F00 <= cp <= 0x1FFF:
+        return True
+    # Fullwidth a-z
+    if 0xFF41 <= cp <= 0xFF5A:
+        return True
+    return False
+
+
+@always_inline
+def is_mark(cp: Int) -> Bool:
+    """Return True if cp is a combining mark (like \\p{M} in regex).
+
+    Covers combining diacritical marks, various script-specific combining
+    characters, and variation selectors.  Used by the o200k_base pre-tokenizer.
+    """
+    return (
+        (0x0300 <= cp and cp <= 0x036F)  # Combining Diacritical Marks
+        or (0x0483 <= cp and cp <= 0x0489)  # Cyrillic
+        or (0x0591 <= cp and cp <= 0x05BD)  # Hebrew
+        or cp == 0x05BF or cp == 0x05C1 or cp == 0x05C2
+        or cp == 0x05C4 or cp == 0x05C5 or cp == 0x05C7
+        or (0x0610 <= cp and cp <= 0x061A)  # Arabic
+        or (0x064B <= cp and cp <= 0x065F)
+        or cp == 0x0670
+        or (0x06D6 <= cp and cp <= 0x06DC)
+        or (0x06DF <= cp and cp <= 0x06E4)
+        or (0x06E7 <= cp and cp <= 0x06E8)
+        or (0x06EA <= cp and cp <= 0x06ED)
+        or (0x0711 <= cp and cp <= 0x074A)  # Syriac
+        or (0x0901 <= cp and cp <= 0x0903)  # Devanagari
+        or cp == 0x093C or (0x093E <= cp and cp <= 0x094D)
+        or (0x0951 <= cp and cp <= 0x0954)
+        or (0x0962 <= cp and cp <= 0x0963)
+        or (0x0981 <= cp and cp <= 0x0983)  # Bengali
+        or cp == 0x09BC or (0x09BE <= cp and cp <= 0x09C4)
+        or cp == 0x09C7 or cp == 0x09C8
+        or (0x09CB <= cp and cp <= 0x09CD) or cp == 0x09D7
+        or (0x09E2 <= cp and cp <= 0x09E3)
+        or (0x0E31 <= cp and cp <= 0x0E3A)  # Thai
+        or (0x0E47 <= cp and cp <= 0x0E4E)
+        or (0x0F71 <= cp and cp <= 0x0F84)  # Tibetan
+        or (0x0F86 <= cp and cp <= 0x0F87)
+        or (0x0F90 <= cp and cp <= 0x0FBC)
+        or (0x102B <= cp and cp <= 0x103E)  # Myanmar
+        or (0x17B6 <= cp and cp <= 0x17D3)  # Khmer
+        or (0x1DC0 <= cp and cp <= 0x1DFF)  # Combining Diacritical Marks Supplement
+        or (0x20D0 <= cp and cp <= 0x20F0)  # Combining Marks for Symbols
+        or (0xFE00 <= cp and cp <= 0xFE0F)  # Variation Selectors
+        or (0xFE20 <= cp and cp <= 0xFE2F)  # Combining Half Marks
+        or cp == 0x200C or cp == 0x200D  # ZWJ/ZWNJ
+    )
+
+
+@always_inline
+def is_upper_like(cp: Int) -> Bool:
+    """Like \\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M} for o200k (not-Ll letters + marks).
+
+    Note: \\p{N} (digits) are excluded because o200k's alt 1/2 letter
+    patterns don't include the \\p{N} category.  The ``is_letter`` helper
+    includes digit codepoints that happen to share a Unicode block with
+    letters (e.g. Thai 0x0E50-0x0E59), so we must explicitly prune them.
+    """
+    return (is_letter(cp) and not is_lowercase(cp) and not is_digit(cp)) or is_mark(cp)
+
+
+@always_inline
+def is_lower_like(cp: Int) -> Bool:
+    """Like \\p{Ll}\\p{Lm}\\p{Lo}\\p{M} for o200k (Ll + other letters + marks).
+
+    Same digit-exclusion rationale as ``is_upper_like``.
+    """
+    return (is_letter(cp) and not is_digit(cp)) or is_mark(cp)
+
+
+@always_inline
 def is_whitespace(cp: Int) -> Bool:
     """Return True if cp is a Unicode whitespace codepoint.
 
@@ -1705,45 +1816,266 @@ struct GPT4Pretokenizer[
             ws_len -= 1
         return 0
 
+    # ── o200k_base matchers ──────────────────────────────────────────────
+    # tiktoken's o200k_base uses a different pre-tokenizer pattern from
+    # cl100k_base.  The 7 alternatives are:
+    #
+    #   [^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*  # 1  Prefix + upper* + lower+ + (?i:contraction)
+    #     [\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?
+    #   | [^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+  # 2  Prefix + upper+ + lower* + (?i:contraction)
+    #     [\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?
+    #   | \p{N}{1,3}                                           # 3  Digit run, max 3
+    #   |  ?[^\s\p{L}\p{N}]+[\r\n/]*                          # 4  Space + punct + trailing nl/slash
+    #   | \s*[\r\n]+                                           # 5  Ws* + one or more CR/LF
+    #   | \s+(?!\S)                                            # 6  Ws not followed by non-space
+    #   | \s+                                                  # 7  Whitespace run
+    #
+    # Key differences from cl100k:
+    #   - Contractions are suffixes on letter alternatives (not standalone)
+    #   - Letter runs split by case: upper-first-then-lower vs all-upper
+    #   - Punct run allows trailing '/' in addition to CR/LF
+    #   - Newline matcher consumes 1+ CR/LF (old consumed exactly 1)
+    #   - 7 alternatives (vs 8 for cl100k — no standalone contraction)
+
+    @staticmethod
+    @always_inline
+    def _match_o200k_alt1(span: Span[UInt8, _], pos: Int) raises -> Int:
+        """Match o200k alternative 1: letter run with at least one lowercase.
+
+        [^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*
+          [\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?
+
+        Tries optional non-L/N prefix, then zero+ upper-like letters,
+        then one+ lower-like letters (which must include at least one Ll),
+        then optional contraction.
+        """
+        var n = len(span)
+        var i = pos
+        if i >= n:
+            return 0
+        # Optional prefix: [^\r\n\p{L}\p{N}]?
+        var lead = span[i]
+        var cplen = utf8_byte_length(lead)
+        var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
+            i += cplen
+            if i >= n:
+                return 0
+        # Upper-like letters: [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*
+        while i < n:
+            var cur_lead = span[i]
+            var cur_len = utf8_byte_length(cur_lead)
+            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+            if is_upper_like(cur_cp):
+                i += cur_len
+            else:
+                break
+        # Lower-like letters: [\p{Ll}\p{Lm}\p{Lo}\p{M}]+
+        var lower_start = i
+        while i < n:
+            var cur_lead = span[i]
+            var cur_len = utf8_byte_length(cur_lead)
+            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+            if is_lower_like(cur_cp):
+                i += cur_len
+            else:
+                break
+        if i == lower_start:
+            return 0
+        # Optional contraction: (?i:'s|'t|'re|'ve|'m|'ll|'d)?
+        var cont = GPT4Pretokenizer._match_contraction(span, i)
+        if cont > 0:
+            i += cont
+        return i - pos
+
+    @staticmethod
+    @always_inline
+    def _match_o200k_alt2(span: Span[UInt8, _], pos: Int) raises -> Int:
+        """Match o200k alternative 2: letter run with at least one uppercase.
+
+        [^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+
+          [\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?
+
+        Like alt 1 but requires 1+ upper-like letters first, then optional
+        lower-like letters.  Catches all-caps words and sequences without
+        a lowercase component.
+
+        Note: alt 1 is tried first.  This alternative only fires when
+        there are upper-like letters with no following lower-like letters.
+        """
+        var n = len(span)
+        var i = pos
+        if i >= n:
+            return 0
+        # Optional prefix: [^\r\n\p{L}\p{N}]?
+        var lead = span[i]
+        var cplen = utf8_byte_length(lead)
+        var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
+            i += cplen
+            if i >= n:
+                return 0
+        # Upper-like letters: [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+
+        var upper_start = i
+        while i < n:
+            var cur_lead = span[i]
+            var cur_len = utf8_byte_length(cur_lead)
+            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+            if is_upper_like(cur_cp):
+                i += cur_len
+            else:
+                break
+        if i == upper_start:
+            return 0
+        # Lower-like letters: [\p{Ll}\p{Lm}\p{Lo}\p{M}]*
+        while i < n:
+            var cur_lead = span[i]
+            var cur_len = utf8_byte_length(cur_lead)
+            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+            if is_lower_like(cur_cp):
+                i += cur_len
+            else:
+                break
+        # Optional contraction: (?i:'s|'t|'re|'ve|'m|'ll|'d)?
+        var cont = GPT4Pretokenizer._match_contraction(span, i)
+        if cont > 0:
+            i += cont
+        return i - pos
+
+    @staticmethod
+    @always_inline
+    def _match_o200k_punct_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+        """Match o200k alternative 4:  ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*.
+
+        Like cl100k alt 4 but trailing CR/LF/slash are consumed via
+        [\\r\\n/]* instead of [\\r\\n]*+.
+        """
+        var n = len(span)
+        var i = pos
+        if i >= n:
+            return 0
+        if span[i] == UInt8(32):
+            i += 1
+        var found_punct = False
+        while i < n:
+            var lead = span[i]
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if is_whitespace(cp) or is_letter_or_digit(cp):
+                break
+            found_punct = True
+            i += cplen
+        if not found_punct:
+            return 0
+        # Trailing CR, LF, or slash
+        while i < n and (span[i] == UInt8(10) or span[i] == UInt8(13) or span[i] == UInt8(47)):
+            i += 1
+        return i - pos
+
+    @staticmethod
+    @always_inline
+    def _match_o200k_ws_run(span: Span[UInt8, _], pos: Int) -> Int:
+        """Match o200k alternative 7: \\s+ — one or more ASCII whitespace bytes.
+
+        Unlike cl100k's final \\s (single byte), o200k uses \\s+ to consume
+        an entire whitespace run in one token.
+        """
+        var n = len(span)
+        if pos >= n:
+            return 0
+        if not is_ascii_ws_byte(Int(span[pos])):
+            return 0
+        var i = pos + 1
+        while i < n and is_ascii_ws_byte(Int(span[i])):
+            i += 1
+        return i - pos
+
+    @staticmethod
+    @always_inline
+    def _match_o200k_newline(span: Span[UInt8, _], pos: Int) -> Int:
+        """Match o200k alternative 5: \\s*[\\r\\n]+.
+
+        Like cl100k alt 6 but requires 1+ CR/LF characters, not exactly 1.
+
+        Implements regex backtracking: \\s* greedily consumes all ASCII
+        whitespace, then shrinks from the right until the remaining suffix
+        ends with at least one CR or LF.
+        """
+        var n = len(span)
+        if pos >= n:
+            return 0
+        # Scan forward to find end of full ASCII-whitespace run
+        var ws_end = pos
+        while ws_end < n and is_ascii_ws_byte(Int(span[ws_end])):
+            ws_end += 1
+        if ws_end == pos:
+            return 0
+        # Scan backward from ws_end to find a CR/LF, then include all
+        # consecutive CR/LF bytes after it.  This simulates the regex
+        # backtracking: \\s* [\\r\\n]+  where \\s* gives up characters
+        # until [\\r\\n]+ can match at least one.
+        var i = ws_end
+        while i > pos:
+            i -= 1
+            if span[i] == UInt8(10) or span[i] == UInt8(13):
+                var j = i
+                while j < ws_end and (span[j] == UInt8(10) or span[j] == UInt8(13)):
+                    j += 1
+                return j - pos
+        return 0
+
     @staticmethod
     def _best_match(span: Span[UInt8, _], pos: Int) raises -> Int:
-        """Try all 8 matchers left-to-right; return the first match.
+        """Try all matchers left-to-right; return the first match.
 
-        Implements regex alternation for the cl100k_base pattern.
-        Matchers are tried in order (alternatives 1-8).  The FIRST
-        one that returns a positive match length wins.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            The match length in bytes, or 0 if no matcher matched.
-            When 0 is returned, the caller (split()) falls back to
-            consuming a single codepoint via utf8_byte_length().
+        Uses cl100k_base (8 alt) or o200k_base (7 alt) depending on
+        the ByteMapping parameter — selected at compile time.
         """
-        var m = GPT4Pretokenizer._match_contraction(span, pos)
-        if m > 0:
-            return m
-        m = GPT4Pretokenizer._match_letter_run(span, pos)
-        if m > 0:
-            return m
-        m = GPT4Pretokenizer._match_digit_run(span, pos)
-        if m > 0:
-            return m
-        m = GPT4Pretokenizer._match_punct_run(span, pos)
-        if m > 0:
-            return m
-        m = Self.match_trailing_all_ws(span, pos)
-        if m > 0:
-            return m
-        m = GPT4Pretokenizer._match_newline(span, pos)
-        if m > 0:
-            return m
-        m = Self.match_ws_not_before_nonws(span, pos)
-        if m > 0:
-            return m
-        return Self.match_single_ws(span, pos)
+        comptime if Self.mapping == ByteMapping.SHUFFLED:
+            # o200k_base: 7 alternatives
+            var m = GPT4Pretokenizer._match_o200k_alt1(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_o200k_alt2(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_digit_run(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_o200k_punct_run(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_o200k_newline(span, pos)
+            if m > 0:
+                return m
+            m = Self.match_ws_not_before_nonws(span, pos)
+            if m > 0:
+                return m
+            return GPT4Pretokenizer._match_o200k_ws_run(span, pos)
+        else:
+            # cl100k_base: 8 alternatives
+            var m = GPT4Pretokenizer._match_contraction(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_letter_run(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_digit_run(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_punct_run(span, pos)
+            if m > 0:
+                return m
+            m = Self.match_trailing_all_ws(span, pos)
+            if m > 0:
+                return m
+            m = GPT4Pretokenizer._match_newline(span, pos)
+            if m > 0:
+                return m
+            m = Self.match_ws_not_before_nonws(span, pos)
+            if m > 0:
+                return m
+            return Self.match_single_ws(span, pos)
 
     def split_view[mut: Bool, //, origin: Origin[mut=mut]](
         self, text: StringSlice[origin]
@@ -1760,7 +2092,7 @@ struct GPT4Pretokenizer[
         var span = text.as_bytes()
         var pos = 0
         while pos < n:
-            var best_len = GPT4Pretokenizer._best_match(span, pos)
+            var best_len = Self._best_match(span, pos)
             if best_len == 0:
                 best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]

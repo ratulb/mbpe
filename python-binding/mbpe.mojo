@@ -503,9 +503,17 @@ def _find_data_dir() raises -> String:
 def py_get_encoding(name: PythonObject) raises -> PythonObject:
     var enc_name = String(name)
     var data_dir = _find_data_dir()
-    if enc_name == "gpt2":
+    if enc_name == "gpt2" or enc_name == "r50k_base":
         var tok = GPT2TK()
         tok.load_tiktoken(data_dir + "/gpt2.tiktoken")
+        return PythonObject(alloc=tok^)
+    elif enc_name == "p50k_base":
+        var tok = GPT2TK()
+        tok.load_tiktoken(data_dir + "/p50k_base.tiktoken")
+        return PythonObject(alloc=tok^)
+    elif enc_name == "p50k_edit":
+        var tok = GPT2TK()
+        tok.load_tiktoken(data_dir + "/p50k_edit.tiktoken")
         return PythonObject(alloc=tok^)
     elif enc_name == "cl100k":
         var tok = GPT4TK()
@@ -514,6 +522,10 @@ def py_get_encoding(name: PythonObject) raises -> PythonObject:
     elif enc_name == "o200k":
         var tok = GPT4oTK()
         tok.load_tiktoken(data_dir + "/o200k.tiktoken")
+        return PythonObject(alloc=tok^)
+    elif enc_name == "o200k_harmony":
+        var tok = GPT4oTK()
+        tok.load_tiktoken(data_dir + "/o200k_harmony.tiktoken")
         return PythonObject(alloc=tok^)
     else:
         raise Error("unknown encoding: " + enc_name)
