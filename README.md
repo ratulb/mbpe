@@ -201,6 +201,19 @@ tok.train((["hello world"]), 300)
 
 ---
 
+### Try it yourself
+
+[`benchmarks/compare_mbpe_tiktoken.py`](benchmarks/compare_mbpe_tiktoken.py) — self-contained script that downloads a corpus from Project Gutenberg and compares mbpe vs tiktoken encode/decode throughput. Run it anywhere:
+
+```bash
+pip install mbpe tiktoken
+python benchmarks/compare_mbpe_tiktoken.py
+```
+
+Paste the body into a Colab or Kaggle cell (prepend `!pip install mbpe tiktoken`) for the same comparison in a notebook.
+
+---
+
 ## Architecture
 
 At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of the compile-time `PreTokenizer` trait.
