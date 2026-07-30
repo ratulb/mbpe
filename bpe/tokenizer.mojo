@@ -1074,9 +1074,10 @@ struct Tokenizers:
     comptime o200k = GPT4Pretokenizer[ByteMapping.SHUFFLED]
 
     @staticmethod
-    def get[T: PreTokenizer]() raises -> BPETokenizer[T]:
+    def get[T: PreTokenizer](filename: String = "") raises -> BPETokenizer[T]:
+        var fname = T.name() if filename.byte_length() == 0 else filename
         var tok = BPETokenizer[T]()
-        tok.load_tiktoken(_find_data_dir() + "/" + T.name() + ".tiktoken")
+        tok.load_tiktoken(_find_data_dir() + "/" + fname + ".tiktoken")
         return tok^
 
     @staticmethod

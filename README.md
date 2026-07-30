@@ -19,7 +19,7 @@ print(tokenizer.decode(tokens))        # "hello world"
 ## Why mbpe?
 
 - **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
-- **Fast** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three encodings. See [Benchmarks](#benchmarks) 
+- **Fast** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three encodings. See [Benchmarks](#benchmarks)
 - **Fast Python bindings** - Substantially outperform Python `tiktoken`, while still remaining competitive with `tiktoken-rs`.
 - **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, then save directly to `.tiktoken` format.
 - **Extensible by design** — `PreTokenizer` is a Mojo trait, not a hardcoded implementation. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
@@ -128,7 +128,7 @@ print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 
 ---
 
-### Mojo API: 
+### Mojo API:
 
 #### Load an encoding
 
@@ -213,7 +213,6 @@ python benchmarks/compare_mbpe_tiktoken.py
 Paste the body into a Colab or Kaggle cell (prepend `!pip install mbpe tiktoken`) for the same comparison in a notebook.
 
 ---
-
 ## Architecture
 
 At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of the compile-time `PreTokenizer` trait.
@@ -234,7 +233,7 @@ At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of t
                              Training          Encode/Decode
 
 ```
-> A `PreTokenizer` converts input text into a sequence of symbols (e.g. regex chunks, Ġ-prefixed words, or future custom segmentations) before BPE merging begins.                                          
+> A `PreTokenizer` converts input text into a sequence of symbols (e.g. regex chunks, Ġ-prefixed words, or future custom segmentations) before BPE merging begins.
 
 
 ### comptime aliases:

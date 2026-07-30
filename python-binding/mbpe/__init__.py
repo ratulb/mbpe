@@ -183,8 +183,17 @@ def _find_data_dir():
 
 _ENCODING_MAP = {
     "gpt2": GPT2Tokenizer,
+    "r50k_base": GPT2Tokenizer,
+    "p50k_base": GPT2Tokenizer,
+    "p50k_edit": GPT2Tokenizer,
     "cl100k": GPT4Tokenizer,
     "o200k": GPT4oTokenizer,
+    "o200k_harmony": GPT4oTokenizer,
+}
+
+# Encodings whose .tiktoken filename differs from their name
+_ENCODING_FILE = {
+    "r50k_base": "gpt2",
 }
 
 
@@ -194,18 +203,20 @@ def get_encoding(name):
     Parameters
     ----------
     name : str
-        One of ``"gpt2"``, ``"cl100k"``, or ``"o200k"``.
+        One of ``"gpt2"``, ``"r50k_base"``, ``"p50k_base"``, ``"p50k_edit"``,
+        ``"cl100k"``, ``"o200k"``, or ``"o200k_harmony"``.
 
     Returns
     -------
-    GPreTokenizer | GPT2Tokenizer | GPT4Tokenizer | GPT4oTokenizer
+    GPT2Tokenizer | GPT4Tokenizer | GPT4oTokenizer
         Loaded tokenizer instance.
     """
     cls = _ENCODING_MAP.get(name)
     if cls is None:
         raise ValueError(f"unknown encoding {name!r}; use one of {list(_ENCODING_MAP)}")
+    fname = _ENCODING_FILE.get(name, name)
     tok = cls()
-    tok._tok.load_tiktoken(os.path.join(_find_data_dir(), f"{name}.tiktoken"))
+    tok._tok.load_tiktoken(os.path.join(_find_data_dir(), f"{fname}.tiktoken"))
     return tok
 
 
