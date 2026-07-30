@@ -2,7 +2,8 @@
 
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
-**A fast tiktoken-compatible BPE tokenizer, written in Mojo.** Drop-in replacement for OpenAI's `tiktoken`, with native encode/decode up to 2× faster — plus training, custom pre-tokenizers, and a Python API that matches `tiktoken`'s almost method-for-method.
+A **high-performance**, trainable, tiktoken-compatible BPE tokenizer written in **Mojo**.
+The compile-time `PreTokenizer` trait enables GPT-2, GPT-4, GPT-4o and custom tokenization pipelines without changing the core tokenizer.
 
 ```python
 import mbpe
@@ -18,10 +19,10 @@ print(tokenizer.decode(tokens))        # "hello world"
 ## Why mbpe?
 
 - **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
-- **Fast** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three stock encodings; Python bindings beat Python `tiktoken` on gpt2 and cl100k. See [Benchmarks](#benchmarks) for the full picture, including where the margins are closer.
-- **Python binding is fast** - Python binding is as fast or close to `tiktoken-rs` as of the latest round of optimization.
-- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, from scratch, saved straight to `.tiktoken` format.
-- **Extensible by design** — pre-tokenizers are a Mojo trait, not hardcoded. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
+- **Fast** — Mojo native beats [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs) (Rust) on both encode and decode across all three encodings. See [Benchmarks](#benchmarks)
+- **Fast Python bindings** - Substantially outperform Python `tiktoken`, while still remaining competitive with `tiktoken-rs`.
+- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, then save directly to `.tiktoken` format.
+- **Extensible by design** — `PreTokenizer` is a Mojo trait, not a hardcoded implementation. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
 - **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
 ---
@@ -74,7 +75,7 @@ tokenizer.train(corpus, vocab_size=300)
 print(tokenizer.encode("the cat sat"))            # [259, 270, 265]
 tokenizer.save_tiktoken("my_tokenizer.tiktoken")
 
-# Or train with a GPT-4-style pre-tokenizer
+# Or train with a GPT-4-style `PreTokenizer`
 tokenizer = mbpe.GPT4Tokenizer()
 tokenizer.train(corpus, vocab_size=300)
 ```
@@ -127,78 +128,39 @@ print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 
 ---
 
-## API
+### Mojo API:
 
-| Python class | Mojo backend | Pre-tokenizer | `name()` |
-|---|---|---|---|
-| `GPreTokenizer` | `BPETokenizer[GPreTokenizer]` | Ġ (space → U+0120 + split) | `"gpre"` |
-| `GPT2Tokenizer` | `BPETokenizer[GPT2Pretokenizer]` | r50k_base regex (7 patterns) | `"gpt2"` |
-| `GPT4Tokenizer` | `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base regex (8 patterns) | `"cl100k"` |
-| `GPT4oTokenizer` | `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base regex (8 patterns, shuffled byte mapping) | `"o200k"` |
+#### Load an encoding
 
-All four classes share the same method interface:
-
-| Method | Description |
-|---|---|
-| `train(texts, vocab_size)` | Train BPE from scratch |
-| `encode(text, **kwargs)` | Encode with special token handling |
-| `encode_ordinary(text)` | Encode ignoring special tokens |
-| `decode(ids)` | Decode token IDs to string |
-| `decode_bytes(ids)` | Decode to raw `bytes` |
-| `decode_single_token_bytes(id)` | Raw bytes for one token |
-| `decode_with_offsets(ids)` | `(text, [(start, end), ...])` — decoded text with byte offsets per token |
-| `encode_single_token(text)` | Look up a token string's ID |
-| `token_byte_values()` | Raw bytes for all token IDs |
-| `name()` | Pre-tokenizer name |
-| `n_vocab` (property) | Vocabulary size |
-| `save_tiktoken(path)` | Save in .tiktoken format |
-| `load_tiktoken(path)` | Load from .tiktoken file |
-| `register_special_tokens(dict)` | Register special tokens |
-
-Module-level functions:
-
-| Function | Description |
-|---|---|
-| `get_encoding(name)` | Load pre-trained encoding (gpt2, cl100k, o200k) |
-| `train(texts, vocab_size)` | Train with GPreTokenizer (default) |
-| `_train_impl(texts, vocab_size, pt)` | Train with specific pre-tokenizer |
-
----
-
-### Mojo (native)
-
-| Struct | Usage | Pre-tokenizer |
-|---|---|---|
-| `Tokenizers.get[Tokenizers.gpt2]()` | `→ BPETokenizer[GPT2Pretokenizer]` | r50k_base |
-| `Tokenizers.get[Tokenizers.cl100k]()` | `→ BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base |
-| `Tokenizers.get[Tokenizers.o200k]()` | `→ BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base |
+BPETokenizer[PT] / Tokenizers.get[PT] → returns comptime parameterized tokenizer. Loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`
 
 ```mojo
+
 from bpe.tokenizer import Tokenizers
 
-def example() raises:
-    var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
-    var ids = gpt2.encode("hello world")
-    print(gpt2.decode(ids))
-```
+var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
+var ids = gpt2.encode("hello world")
+print(gpt2.decode(ids))
 
-`Tokenizers.get[]` loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`. To train, parameterize `BPETokenizer` directly:
+```
+#### Train:
 
 ```mojo
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import GPT2Pretokenizer
 
 var tok = BPETokenizer[GPT2Pretokenizer]()
-tok.train(Span[String](["hello world"]), 300)
+tok.train((["hello world"]), 300)
 ```
+
 
 ---
 
 ## Benchmarks
 
-5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies. **Bold** marks the fastest implementation in each column. `mbpe` shows up twice per table — once as the pure Mojo binary, once through its Python bindings — so those two rows are labeled explicitly below rather than left as a bare "Mojo native."
+5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
 
-**Mojo native leads or ties every row on both encode and decode.** The Python bindings beat or match Python `tiktoken` on gpt2 and cl100k; on o200k, `tiktoken` and `tiktoken-rs` are competitive on encode while `mbpe` still leads decode — included here rather than trimmed, since a partial win reported honestly is more useful than a clean sweep that doesn't hold up under scrutiny.
+> **Across all three OpenAI encodings, native Mojo is consistently the fastest implementation for both encoding and decoding, while the Python bindings substantially outperform Python tiktoken**.
 
 #### gpt2 (r50k_base)
 
@@ -239,22 +201,57 @@ tok.train(Span[String](["hello world"]), 300)
 
 ---
 
+### Try it yourself
+
+[`benchmarks/compare_mbpe_tiktoken.py`](benchmarks/compare_mbpe_tiktoken.py) — self-contained script that downloads a corpus from Project Gutenberg and compares mbpe vs tiktoken encode/decode throughput. Run it anywhere:
+
+```bash
+pip install mbpe tiktoken
+python benchmarks/compare_mbpe_tiktoken.py
+```
+
+Paste the body into a Colab or Kaggle cell (prepend `!pip install mbpe tiktoken`) for the same comparison in a notebook.
+
+---
 ## Architecture
 
-**`BPETokenizer[PT]`** / **`Tokenizers.get[]`** — parameterized by pre-tokenizer type at compile time. The `Tokenizers` struct provides convenient comptime aliases:
+At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of the compile-time `PreTokenizer` trait.
 
-- `Tokenizers.gpt2` → `GPT2Pretokenizer`
-- `Tokenizers.cl100k` → `GPT4Pretokenizer[ByteMapping.SEQUENTIAL]`
-- `Tokenizers.o200k` → `GPT4Pretokenizer[ByteMapping.SHUFFLED]`
+```
+                                         Text
+                                          │
+                                          ▼
+                                  PreTokenizer(trait)
+                                          │
+                                          ▼
+                                   Symbol Sequence
+                                          │
+                                          ▼
+                                   BPETokenizer[PT]
+                                 ┌────────┴─────────┐
+                                 ▼                  ▼
+                             Training          Encode/Decode
 
-Use `Tokenizers.get[Tokenizers.gpt2]()` to load a pre-built encoding from its `.tiktoken` file.
+```
+> A `PreTokenizer` converts input text into a sequence of symbols (e.g. regex chunks, Ġ-prefixed words, or future custom segmentations) before BPE merging begins.
 
-- **Byte-level base vocabulary** — all 256 byte values (0x00–0xFF), no UNK token. Every valid UTF-8 input is losslessly representable.
-- **GPT-2 `bytes_to_unicode`** — printable bytes map to themselves; control/whitespace bytes map to unused Unicode codepoints ≥ 256.
-- **MergeLookup** — two-tier merge lookup: a flat 1024×1024 Byte array (8 MB heap) for IDs < 1000, a `Dict` for IDs ≥ 1000. Transforms sequential rule application into O(1) rank-based lookup — 3× encode speedup vs. naive scanning.
-- **Incremental pair stats** — during training, only 5 pair updates per merge occurrence instead of a full corpus rescan (O(N) vs O(V×W)).
-- **Memcpy decode** — pre-computed flat byte array with token offsets enables bulk memcpy for decode.
-- **3 pre-tokenizer families** (o200k reuses cl100k's with shuffled byte mapping): Ġ convention (space → `Ġ` + split), GPT-2 r50k_base (7 regex alternatives), GPT-4 cl100k_base (8 regex alternatives). Each with its own special tokens and byte mapping.
+
+### comptime aliases:
+
+- `Tokenizers.get[Tokenizers.gpt2]()`  → `BPETokenizer[GPT2Pretokenizer]` → r50k_base
+- `Tokenizers.get[Tokenizers.cl100k]()` → `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` → cl100k_base
+- `Tokenizers.get[Tokenizers.o200k]()`  → `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` → o200k_base
+
+
+---
+
+## Implementation highlights
+
+- Compile-time `PreTokenizer` trait dispatch
+- Two-tier `MergeLookup` cache (flat array + Dict)
+- Incremental pair statistics for training - (O(N) vs O(V×W))
+- Flat memcpy-chain decoder
+- Byte-level, lossless vocabulary
 
 ---
 
@@ -282,8 +279,54 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 
 ---
 
+## API
+
+| Python class | Mojo backend | Pre-tokenizer | `name()` |
+|---|---|---|---|
+| `GPreTokenizer` | `BPETokenizer[GPreTokenizer]` | Ġ (space → U+0120 + split) | `"gpre"` |
+| `GPT2Tokenizer` | `BPETokenizer[GPT2Pretokenizer]` | r50k_base regex (7 patterns) | `"gpt2"` |
+| `GPT4Tokenizer` | `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base regex (8 patterns) | `"cl100k"` |
+| `GPT4oTokenizer` | `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base regex (8 patterns, shuffled byte mapping) | `"o200k"` |
+
+All four classes share the same method interface:
+
+| Method | Description |
+|---|---|
+| `train(texts, vocab_size)` | Train BPE from scratch |
+| `encode(text, **kwargs)` | Encode with special token handling |
+| `encode_ordinary(text)` | Encode ignoring special tokens |
+| `decode(ids)` | Decode token IDs to string |
+| `decode_bytes(ids)` | Decode to raw `bytes` |
+| `decode_single_token_bytes(id)` | Raw bytes for one token |
+| `decode_with_offsets(ids)` | `(text, [(start, end), ...])` — decoded text with byte offsets per token |
+| `encode_single_token(text)` | Look up a token string's ID |
+| `token_byte_values()` | Raw bytes for all token IDs |
+| `name()` | Pre-tokenizer name |
+| `n_vocab` (property) | Vocabulary size |
+| `save_tiktoken(path)` | Save in .tiktoken format |
+| `load_tiktoken(path)` | Load from .tiktoken file |
+| `register_special_tokens(dict)` | Register special tokens |
+
+Module-level functions:
+
+| Function | Description |
+|---|---|
+| `get_encoding(name)` | Load pre-trained encoding (gpt2, cl100k, o200k) |
+| `train(texts, vocab_size)` | Train with GPreTokenizer (default) |
+| `_train_impl(texts, vocab_size, pt)` | Train with specific pre-tokenizer |
+
+---
+## Roadmap
+
+- Resume BPE training from existing vocabularies
+- Unicode-native tokenization through custom `PreTokenizer`s
+- Tokenizers specialized for new languages and domains
+
+---
+
 ## Related projects
 
 - [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python); the format and API mbpe is compatible with
-- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken; see [Benchmarks](#benchmarks) for a head-to-head
+- [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
 - [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
+
