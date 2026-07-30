@@ -166,36 +166,36 @@ tok.train((["hello world"]), 300)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **7.7** | **120.2** |
-| mbpe — Python bindings | 1.54M | 6.0 | 59.4 |
-| tiktoken (Python) | 1.54M | 2.8 | 28.2 |
-| tiktoken-rs | 1.53M | 2.6 | 53.7 |
+| **mbpe — Mojo native** | 1.54M | **7.9** | **127.2** |
+| mbpe — Python bindings | 1.54M | 6.2 | 62.6 |
+| tiktoken (Python) | 1.54M | 3.1 | 29.5 |
+| tiktoken-rs | 1.53M | 2.9 | 56.8 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **5.4** | **115.0** |
-| mbpe — Python bindings | 1.28M | 4.8 | 54.5 |
-| tiktoken (Python) | 1.28M | 2.4 | 28.8 |
-| tiktoken-rs | 1.28M | 2.6 | 53.1 |
+| **mbpe — Mojo native** | 1.28M | **5.7** | **118.6** |
+| mbpe — Python bindings | 1.28M | 5.0 | 60.0 |
+| tiktoken (Python) | 1.28M | 2.6 | 30.8 |
+| tiktoken-rs | 1.28M | 2.8 | 55.3 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **5.1** | **110.2** |
-| mbpe — Python bindings | 1.28M | 4.6 | 54.5 |
-| tiktoken (Python) | 1.28M | 3.9 | 28.1 |
-| tiktoken-rs | 1.28M | 4.4 | 47.8 |
+| **mbpe — Mojo native** | 1.28M | **5.2** | **114.1** |
+| mbpe — Python bindings | 1.28M | 4.8 | 56.2 |
+| tiktoken (Python) | 1.28M | 4.0 | 28.1 |
+| tiktoken-rs | 1.28M | 4.6 | 51.6 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 5072 ms | 11766 ms | 23133 ms | 44078 ms |
-| Merges/s | 48 | 63 | 75 | 84 |
-| Encode (M tok/s) | 11.2 | 8.2 | 6.6 | 6.1 |
+| Train time | 4924 ms | 11403 ms | 22495 ms | 42505 ms |
+| Merges/s | 49 | 65 | 77 | 88 |
+| Encode (M tok/s) | 11.5 | 8.4 | 7.1 | 5.8 |
 
 *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
@@ -252,7 +252,7 @@ At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of t
 - Incremental pair statistics for training - (O(N) vs O(V×W))
 - Flat memcpy-chain decoder
 - Byte-level, lossless vocabulary
-  
+
 ---
 
 ## Development
