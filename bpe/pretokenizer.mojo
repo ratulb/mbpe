@@ -1824,31 +1824,53 @@ struct GPT4Pretokenizer[
             return 0
         # Optional prefix: [^\r\n\p{L}\p{N}]?
         var lead = span[i]
-        var cplen = utf8_byte_length(lead)
-        var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
-            i += cplen
-            if i >= n:
-                return 0
+        if lead < 0x80:
+            var b = Int(lead)
+            if b != 0x0A and b != 0x0D and not ((65 <= b <= 90) or (97 <= b <= 122) or (48 <= b <= 57)):
+                i += 1
+                if i >= n:
+                    return 0
+        else:
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
+                i += cplen
+                if i >= n:
+                    return 0
         # Upper-like letters: [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*
         while i < n:
-            var cur_lead = span[i]
-            var cur_len = utf8_byte_length(cur_lead)
-            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-            if is_upper_like(cur_cp):
-                i += cur_len
+            var b = span[i]
+            if b < 0x80:
+                if 65 <= Int(b) <= 90:
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_lead = b
+                var cur_len = utf8_byte_length(cur_lead)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_upper_like(cur_cp):
+                    i += cur_len
+                else:
+                    break
         # Lower-like letters: [\p{Ll}\p{Lm}\p{Lo}\p{M}]+
         var lower_start = i
         while i < n:
-            var cur_lead = span[i]
-            var cur_len = utf8_byte_length(cur_lead)
-            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-            if is_lower_like(cur_cp):
-                i += cur_len
+            var b = span[i]
+            if b < 0x80:
+                var ib = Int(b)
+                if (65 <= ib <= 90) or (97 <= ib <= 122):
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_lead = b
+                var cur_len = utf8_byte_length(cur_lead)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_lower_like(cur_cp):
+                    i += cur_len
+                else:
+                    break
         if i == lower_start:
             return 0
         # Optional contraction: (?i:'s|'t|'re|'ve|'m|'ll|'d)?
@@ -1878,33 +1900,55 @@ struct GPT4Pretokenizer[
             return 0
         # Optional prefix: [^\r\n\p{L}\p{N}]?
         var lead = span[i]
-        var cplen = utf8_byte_length(lead)
-        var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
-            i += cplen
-            if i >= n:
-                return 0
+        if lead < 0x80:
+            var b = Int(lead)
+            if b != 0x0A and b != 0x0D and not ((65 <= b <= 90) or (97 <= b <= 122) or (48 <= b <= 57)):
+                i += 1
+                if i >= n:
+                    return 0
+        else:
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
+                i += cplen
+                if i >= n:
+                    return 0
         # Upper-like letters: [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+
         var upper_start = i
         while i < n:
-            var cur_lead = span[i]
-            var cur_len = utf8_byte_length(cur_lead)
-            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-            if is_upper_like(cur_cp):
-                i += cur_len
+            var b = span[i]
+            if b < 0x80:
+                if 65 <= Int(b) <= 90:
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_lead = b
+                var cur_len = utf8_byte_length(cur_lead)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_upper_like(cur_cp):
+                    i += cur_len
+                else:
+                    break
         if i == upper_start:
             return 0
         # Lower-like letters: [\p{Ll}\p{Lm}\p{Lo}\p{M}]*
         while i < n:
-            var cur_lead = span[i]
-            var cur_len = utf8_byte_length(cur_lead)
-            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-            if is_lower_like(cur_cp):
-                i += cur_len
+            var b = span[i]
+            if b < 0x80:
+                var ib = Int(b)
+                if (65 <= ib <= 90) or (97 <= ib <= 122):
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_lead = b
+                var cur_len = utf8_byte_length(cur_lead)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_lower_like(cur_cp):
+                    i += cur_len
+                else:
+                    break
         # Optional contraction: (?i:'s|'t|'re|'ve|'m|'ll|'d)?
         var cont = GPT4Pretokenizer._match_contraction(span, i)
         if cont > 0:
@@ -1927,13 +1971,23 @@ struct GPT4Pretokenizer[
             i += 1
         var found_punct = False
         while i < n:
-            var lead = span[i]
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if is_whitespace(cp) or is_letter_or_digit(cp):
-                break
-            found_punct = True
-            i += cplen
+            var b = span[i]
+            if b < 0x80:
+                var ib = Int(b)
+                var is_ws = ib == 0x09 or ib == 0x0A or ib == 0x0B or ib == 0x0C or ib == 0x0D or ib == 0x20
+                var is_lnd = (65 <= ib <= 90) or (97 <= ib <= 122) or (48 <= ib <= 57)
+                if is_ws or is_lnd:
+                    break
+                found_punct = True
+                i += 1
+            else:
+                var lead = b
+                var cplen = utf8_byte_length(lead)
+                var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+                if is_whitespace(cp) or is_letter_or_digit(cp):
+                    break
+                found_punct = True
+                i += cplen
         if not found_punct:
             return 0
         # Trailing CR, LF, or slash
