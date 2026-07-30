@@ -169,21 +169,9 @@ def decode_codepoint(ptr: UnsafePointer[UInt8, _], length: Int) -> Int:
 
 @always_inline
 def is_letter(cp: Int) -> Bool:
-    """Return True if cp is a Unicode letter (like \\p{L} in regex).
-
-    Covers the most common scripts used in English, European, and CJK text:
-    Latin (including extended), Greek, Cyrillic, Arabic, Hebrew, Devanagari,
-    Thai, CJK Unified Ideographs, Hangul, and more.
-
-    This is NOT a complete Unicode General Category L match -- it only covers
-    the codepoint ranges that appear in practice for tokeniser training on
-    Wikipedia-scale English text.  The ranges match what the GPT-2/4 regex
-    engines would match for these scripts.
-    """
-    if 65 <= cp <= 90:
-        return True
-    if 97 <= cp <= 122:
-        return True
+    """Return True if cp is a Unicode letter (like \\p{L} in regex)."""
+    if cp < 128:
+        return (65 <= cp <= 90) or (97 <= cp <= 122)
     return (
         (0x00AA <= cp and cp <= 0x00AA)
         or (0x00B5 <= cp and cp <= 0x00B5)
@@ -227,14 +215,9 @@ def is_letter(cp: Int) -> Bool:
 
 @always_inline
 def is_digit(cp: Int) -> Bool:
-    """Return True if cp is a Unicode digit (like \\p{N} in regex).
-
-    Covers ASCII digits plus common digit scripts: Arabic-Indic, Devanagari,
-    Bengali, Thai, Lao, Tibetan, and others.
-
-    Like is_letter, this is NOT a complete \\p{N} match but covers the
-    digit ranges that appear in practice for English-heavy corpora.
-    """
+    """Return True if cp is a Unicode digit (like \\p{N} in regex)."""
+    if cp < 128:
+        return 48 <= cp <= 57
     return (
         (0x0030 <= cp and cp <= 0x0039)
         or (0x0660 <= cp and cp <= 0x0669)
@@ -265,14 +248,9 @@ def is_letter_or_digit(cp: Int) -> Bool:
 
 @always_inline
 def is_lowercase(cp: Int) -> Bool:
-    """Return True if cp is a Unicode lowercase letter (like \\p{Ll} in regex).
-
-    Covers ASCII lowercase, Latin extended, IPA, Cyrillic, Greek, and fullwidth.
-    Used by the o200k_base pre-tokenizer to distinguish case-sensitive letter runs.
-    """
-    # ASCII lowercase
-    if 0x0061 <= cp <= 0x007A:
-        return True
+    """Return True if cp is a Unicode lowercase letter (like \\p{Ll} in regex)."""
+    if cp < 128:
+        return 97 <= cp <= 122
     # Latin-1 Supplement lowercase
     if 0x00AA == cp or 0x00B5 == cp or 0x00BA == cp:
         return True
@@ -310,11 +288,9 @@ def is_lowercase(cp: Int) -> Bool:
 
 @always_inline
 def is_mark(cp: Int) -> Bool:
-    """Return True if cp is a combining mark (like \\p{M} in regex).
-
-    Covers combining diacritical marks, various script-specific combining
-    characters, and variation selectors.  Used by the o200k_base pre-tokenizer.
-    """
+    """Return True if cp is a combining mark (like \\p{M} in regex)."""
+    if cp < 128:
+        return False
     return (
         (0x0300 <= cp and cp <= 0x036F)  # Combining Diacritical Marks
         or (0x0483 <= cp and cp <= 0x0489)  # Cyrillic
@@ -362,6 +338,8 @@ def is_upper_like(cp: Int) -> Bool:
     includes digit codepoints that happen to share a Unicode block with
     letters (e.g. Thai 0x0E50-0x0E59), so we must explicitly prune them.
     """
+    if cp < 128:
+        return 65 <= cp <= 90
     return (is_letter(cp) and not is_lowercase(cp) and not is_digit(cp)) or is_mark(cp)
 
 
@@ -371,25 +349,16 @@ def is_lower_like(cp: Int) -> Bool:
 
     Same digit-exclusion rationale as ``is_upper_like``.
     """
+    if cp < 128:
+        return (65 <= cp <= 90) or (97 <= cp <= 122)
     return (is_letter(cp) and not is_digit(cp)) or is_mark(cp)
 
 
 @always_inline
 def is_whitespace(cp: Int) -> Bool:
-    """Return True if cp is a Unicode whitespace codepoint.
-
-    Covers: tab, newline, carriage return, space, plus non-break space,
-    various fixed-width spaces, line/paragraph separator, and more.
-
-    Used by the punct-run matchers to detect the boundary where a
-    punctuation token ends and whitespace begins.
-
-    Note: GPT-2's regex uses \\s which matches ONLY ASCII whitespace
-    in the Rust regex crate.  We use the broader Unicode definition
-    here, but in practice the only context where it matters is the
-    punct-run stop condition -- and non-ASCII whitespace before
-    punctuation is vanishingly rare in English text.
-    """
+    """Return True if cp is a Unicode whitespace codepoint."""
+    if cp < 128:
+        return cp == 0x0009 or cp == 0x000A or cp == 0x000D or cp == 0x0020
     return (
         cp == 0x0009
         or cp == 0x000A
