@@ -2,6 +2,9 @@
 
 Paste into a Colab cell (prepend: `!pip install mbpe tiktoken`)
 or run locally:  pip install mbpe tiktoken && python benchmarks/compare_mbpe_tiktoken.py
+#
+# Local run from this repo:
+#   PYTHONPATH=python-binding pixi run -e dev python benchmarks/compare_mbpe_tiktoken.py
 """
 
 import time
