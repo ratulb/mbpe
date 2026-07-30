@@ -2,8 +2,8 @@
 
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 
-A **high-performance**, **trainable**, **tiktoken-compatible BPE tokenizer** written in **Mojo**.
-The compile-time `PreTokenizer` trait enables **GPT-2, GPT-4, GPT-4o** and custom tokenization pipelines without changing the core tokenizer.
+A **high-performance**, trainable, tiktoken-compatible BPE tokenizer written in **Mojo**.
+The compile-time `PreTokenizer` trait enables GPT-2, GPT-4, GPT-4o and custom tokenization pipelines without changing the core tokenizer.
 
 ```python
 import mbpe
@@ -206,20 +206,19 @@ tok.train((["hello world"]), 300)
 At the core of mbpe is `BPETokenizer[PT]`, where `PT` is any implementation of the compile-time `PreTokenizer` trait.
 
 ```
-
-                                                     Text
-                                                      │
-                                                      ▼
-                                              PreTokenizer(trait)
-                                                      │
-                                                      ▼
-                                                Symbol Sequence
-                                                      │
-                                                      ▼
-                                                BPETokenizer[PT]
-                                              ┌────────┴─────────┐
-                                              ▼                  ▼
-                                          Training          Encode/Decode
+                                         Text
+                                          │
+                                          ▼
+                                  PreTokenizer(trait)
+                                          │
+                                          ▼
+                                   Symbol Sequence
+                                          │
+                                          ▼
+                                   BPETokenizer[PT]
+                                 ┌────────┴─────────┐
+                                 ▼                  ▼
+                             Training          Encode/Decode
 
 ```
 > A `PreTokenizer` converts input text into a sequence of symbols (e.g. regex chunks, Ġ-prefixed words, or future custom segmentations) before BPE merging begins.                                          
