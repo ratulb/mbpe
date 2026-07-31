@@ -203,138 +203,69 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
 # TokenByteTable — flat per-token byte storage
 #
 # Layout:
-#   bytes      : concatenated raw bytes of every token
+#   bytes      : concatenated raw bytes of every token (flat allocation)
 #   offsets    : start offset of each token in `bytes`
 #   lengths    : byte length of each token
 #   token i's bytes live at bytes[offsets[i] : offsets[i] + lengths[i]]
 #
-# Memory model (mirrors tenmo's Buffer):
-#   - Three flat heap allocations owned by the table (amortised doubling).
-#   - Unshared tables (default): copying performs a deep copy.
-#   - shared() opts into refcounting: copies become O(1) (pointer copy +
-#     atomic increment) and the allocation is freed when the last
-#     reference drops.  Growth (add/set_bytes) is only valid on unshared
-#     tables; call shared() after the table is fully built.
+# Memory model:
+#   - The byte pool is the only large allocation, kept as a raw
+#     UnsafePointer (amortised doubling).  The index arrays stay
+#     List[Int] so decode keeps origin-based no-alias proofs via
+#     List.unsafe_ptr() — interleaved benchmarks measured raw pointers
+#     for all three arrays 5-26% slower than this hybrid.
+#   - Copies are deep (ImplicitlyCopyable); refcounting was dropped
+#     because the index Lists cannot be shared cheaply.
 #
 # Invariants:
-#   size == number of tokens; offsets[0..size] are valid and
-#   offsets[size] == byte_count  (sentinel — read by
-#   benchmarks/profile_decode.mojo via offsets[id + 1]).
-#   offsets_cap >= size + 1, lengths_cap >= size, bytes_cap >= byte_count.
+#   len(lengths) == len(vocab) in BPETokenizer
+#   after finish(): len(offsets) == len(lengths) + 1, and
+#   offsets[len(lengths)] == byte_count  (sentinel — read by
+#   benchmarks/profile_decode.mojo via offsets[id + 1])
 # ---------------------------------------------------------------------------
 
 
 struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
-    var size: Int
     var byte_count: Int
     var bytes: UnsafePointer[Byte, MutAnyOrigin]
-    var offsets: UnsafePointer[Int, MutAnyOrigin]
-    var lengths: UnsafePointer[Int, MutAnyOrigin]
     var bytes_cap: Int
-    var offsets_cap: Int
-    var lengths_cap: Int
-    var _refcount: UnsafePointer[Atomic[DType.uint64], MutAnyOrigin]
-    var _shared: Bool
+    var offsets: List[Int]
+    var lengths: List[Int]
 
     def __init__(out self):
-        self.size = 0
         self.byte_count = 0
         self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
-        self.offsets = UnsafePointer[Int, MutAnyOrigin].unsafe_dangling()
-        self.lengths = UnsafePointer[Int, MutAnyOrigin].unsafe_dangling()
         self.bytes_cap = 0
-        self.offsets_cap = 0
-        self.lengths_cap = 0
-        self._refcount = UnsafePointer[
-            Atomic[DType.uint64], MutAnyOrigin
-        ].unsafe_dangling()
-        self._shared = False
+        self.offsets = List[Int]()
+        self.offsets.append(0)
+        self.lengths = List[Int]()
 
     def __init__(out self, *, copy: Self):
-        """Copy: shallow + refcount increment if shared, else deep copy."""
-        self.size = copy.size
+        """Deep copy of the byte pool and both index lists."""
         self.byte_count = copy.byte_count
-        self.offsets_cap = copy.offsets_cap
-        self.lengths_cap = copy.lengths_cap
-        self.bytes_cap = copy.bytes_cap
-        self._refcount = copy._refcount
-        self._shared = copy._shared
-        if self._shared:
-            self.bytes = copy.bytes
-            self.offsets = copy.offsets
-            self.lengths = copy.lengths
-            _ = self._refcount[].fetch_add[ordering=Ordering.RELAXED](1)
+        self.bytes_cap = copy.byte_count
+        self.offsets = List[Int](copy=copy.offsets)
+        self.lengths = List[Int](copy=copy.lengths)
+        if self.byte_count > 0:
+            self.bytes = alloc[Byte](self.byte_count)
+            memcpy(dest=self.bytes, src=copy.bytes, count=self.byte_count)
         else:
-            if self.byte_count > 0:
-                self.bytes = alloc[Byte](self.byte_count)
-                memcpy(dest=self.bytes, src=copy.bytes, count=self.byte_count)
-            else:
-                self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
-            if self.size > 0:
-                self.lengths = alloc[Int](self.size)
-                memcpy(dest=self.lengths, src=copy.lengths, count=self.size)
-            else:
-                self.lengths = UnsafePointer[Int, MutAnyOrigin].unsafe_dangling()
-            self.offsets = alloc[Int](self.size + 1)
-            memcpy(dest=self.offsets, src=copy.offsets, count=self.size + 1)
-            self.bytes_cap = self.byte_count
-            self.lengths_cap = self.size
-            self.offsets_cap = self.size + 1
+            self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
 
     def __init__(out self, *, deinit move: Self):
-        self.size = move.size
         self.byte_count = move.byte_count
         self.bytes = move.bytes
-        self.offsets = move.offsets
-        self.lengths = move.lengths
         self.bytes_cap = move.bytes_cap
-        self.offsets_cap = move.offsets_cap
-        self.lengths_cap = move.lengths_cap
-        self._refcount = move._refcount
-        self._shared = move._shared
+        self.offsets = move.offsets^
+        self.lengths = move.lengths^
 
     def __del__(deinit self):
-        if self._shared:
-            if (
-                self._refcount[].fetch_sub[ordering=Ordering.RELEASE](1) != 1
-            ):
-                return  # other references remain
-            fence[ordering=Ordering.ACQUIRE]()
-            self._refcount.free()
         if self.bytes_cap > 0:
             self.bytes.free()
-        if self.offsets_cap > 0:
-            self.offsets.free()
-        if self.lengths_cap > 0:
-            self.lengths.free()
 
     @always_inline
     def __len__(self) -> Int:
-        return self.size
-
-    @always_inline
-    def is_shared(self) -> Bool:
-        return self._shared
-
-    def shared(mut self):
-        """Convert to refcounted mode (copies become O(1)).
-
-        Must be called after the table is fully built — growth is not
-        allowed on shared tables.
-        """
-        if self._shared:
-            return
-        if self.size == 0 and self.byte_count == 0:
-            return
-        var rc = alloc[Atomic[DType.uint64]](1)
-        rc[] = Atomic[DType.uint64](1)
-        self._refcount = rc
-        self._shared = True
-
-    def ref_count(self) -> UInt64:
-        if not self._shared:
-            return 0
-        return self._refcount[].load[ordering=Ordering.RELAXED]()
+        return len(self.lengths)
 
     @always_inline
     def _ensure_bytes_cap(mut self, needed: Int):
@@ -351,66 +282,36 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
         self.bytes_cap = new_cap
 
     @always_inline
-    def _ensure_offsets_cap(mut self, needed: Int):
-        if needed <= self.offsets_cap:
-            return
-        var new_cap = needed
-        if new_cap < 2 * self.offsets_cap:
-            new_cap = 2 * self.offsets_cap
-        var new_ptr = alloc[Int](new_cap)
-        if self.offsets_cap > 0:
-            memcpy(dest=new_ptr, src=self.offsets, count=self.size + 1)
-            self.offsets.free()
-        self.offsets = new_ptr
-        self.offsets_cap = new_cap
-
-    @always_inline
-    def _ensure_lengths_cap(mut self, needed: Int):
-        if needed <= self.lengths_cap:
-            return
-        var new_cap = needed
-        if new_cap < 2 * self.lengths_cap:
-            new_cap = 2 * self.lengths_cap
-        var new_ptr = alloc[Int](new_cap)
-        if self.lengths_cap > 0:
-            memcpy(dest=new_ptr, src=self.lengths, count=self.size)
-            self.lengths.free()
-        self.lengths = new_ptr
-        self.lengths_cap = new_cap
-
-    @always_inline
     def reserve(mut self, max_tokens: Int):
-        self._ensure_offsets_cap(max_tokens + 1)
-        self._ensure_lengths_cap(max_tokens)
+        self.offsets.reserve(max_tokens + 1)
+        self.lengths.reserve(max_tokens)
 
     @always_inline
     def add(mut self, raw: Span[Byte, _]):
         """Append a token's raw bytes."""
         var new_count = self.byte_count + len(raw)
         self._ensure_bytes_cap(new_count)
-        var new_size = self.size + 1
-        self._ensure_offsets_cap(new_size + 1)
-        self._ensure_lengths_cap(new_size)
-        self.offsets[self.size] = self.byte_count
+        var new_size = len(self.lengths) + 1
+        self.offsets.append(0)
+        self.lengths.append(0)
+        self.offsets[new_size - 1] = self.byte_count
         memcpy(
             dest=self.bytes + self.byte_count,
             src=raw.unsafe_ptr(),
             count=len(raw),
         )
-        self.lengths[self.size] = len(raw)
+        self.lengths[new_size - 1] = len(raw)
         self.byte_count = new_count
-        self.size = new_size
-        self.offsets[self.size] = self.byte_count
+        self.offsets[new_size] = self.byte_count
 
     @always_inline
     def set_bytes(mut self, id: Int, raw: Span[Byte, _]):
         """Register a token at an exact id, padding gaps with empty tokens."""
-        while self.size <= id:
-            self._ensure_offsets_cap(self.size + 2)
-            self._ensure_lengths_cap(self.size + 1)
-            self.offsets[self.size] = self.byte_count
-            self.lengths[self.size] = 0
-            self.size += 1
+        while len(self.lengths) <= id:
+            self.offsets.append(self.byte_count)
+            self.lengths.append(0)
+        if len(self.offsets) == len(self.lengths):
+            self.offsets.append(self.byte_count)
         var new_count = self.byte_count + len(raw)
         self._ensure_bytes_cap(new_count)
         self.offsets[id] = self.byte_count
@@ -421,13 +322,13 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
         )
         self.lengths[id] = len(raw)
         self.byte_count = new_count
-        self.offsets[self.size] = self.byte_count
+        self.offsets[len(self.offsets) - 1] = self.byte_count
 
     @always_inline
     def finish(mut self):
-        """Append the sentinel offset (== total bytes)."""
-        self._ensure_offsets_cap(self.size + 1)
-        self.offsets[self.size] = self.byte_count
+        """Append the sentinel offset (== total bytes), if not already present."""
+        if len(self.offsets) == len(self.lengths):
+            self.offsets.append(self.byte_count)
 
 
 # ---------------------------------------------------------------------------
@@ -880,8 +781,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     ](self, ids: Span[Int, origin]) raises -> String:
         if len(ids) == 0:
             return String("")
-        var lens = self.token_table.lengths.as_noalias_ptr()
-        var offs = self.token_table.offsets.as_noalias_ptr()
+        var lens = self.token_table.lengths.unsafe_ptr()
+        var offs = self.token_table.offsets.unsafe_ptr()
         var n_tokens = len(self.token_table)
         var total: Int = 0
         for id in ids:
@@ -916,8 +817,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     ](self, ids: Span[Int, origin]) raises -> ByteSequence:
         if len(ids) == 0:
             return ByteSequence()
-        var lens = self.token_table.lengths.as_noalias_ptr()
-        var offs = self.token_table.offsets.as_noalias_ptr()
+        var lens = self.token_table.lengths.unsafe_ptr()
+        var offs = self.token_table.offsets.unsafe_ptr()
         var n_tokens = len(self.token_table)
         var total: Int = 0
         for id in ids:
@@ -941,10 +842,10 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     def decode_single_token_bytes(self, id: Int) raises -> ByteSequence:
         if id < 0 or id >= len(self.token_table):
             raise Error("token ID out of range: " + String(id))
-        var n = self.token_table.lengths.as_noalias_ptr()[id]
+        var n = self.token_table.lengths.unsafe_ptr()[id]
         if n == 0:
             return ByteSequence()
-        var off = self.token_table.offsets.as_noalias_ptr()[id]
+        var off = self.token_table.offsets.unsafe_ptr()[id]
         var ptr = self.token_table.bytes.as_noalias_ptr()
         var result = ByteSequence(capacity=n)
         result.resize(n, 0)
@@ -958,8 +859,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     ) raises -> String:
         if len(ids) == 0:
             return String("")
-        var lens = self.token_table.lengths.as_noalias_ptr()
-        var offs = self.token_table.offsets.as_noalias_ptr()
+        var lens = self.token_table.lengths.unsafe_ptr()
+        var offs = self.token_table.offsets.unsafe_ptr()
         var n_tokens = len(self.token_table)
         var total: Int = 0
         for id in ids:
@@ -983,8 +884,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
 
     def token_byte_values(self) -> List[ByteSequence]:
         var result = List[ByteSequence](capacity=len(self.token_table))
-        var lens = self.token_table.lengths.as_noalias_ptr()
-        var offs = self.token_table.offsets.as_noalias_ptr()
+        var lens = self.token_table.lengths.unsafe_ptr()
+        var offs = self.token_table.offsets.unsafe_ptr()
         var ptr = self.token_table.bytes.as_noalias_ptr()
         for i in range(len(self.token_table)):
             var n = lens[i]

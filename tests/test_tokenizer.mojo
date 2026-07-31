@@ -178,9 +178,9 @@ def test_unicode_roundtrip() raises:
 
 
 def test_token_table_copy_semantics() raises:
-    """Verify TokenByteTable copy semantics: deep copy while unshared,
-    O(1) refcounted copy after shared(), and the offsets sentinel
-    (offsets[size] == byte_count) is maintained by add/set_bytes.
+    """Verify TokenByteTable copy semantics: deep copy of the byte pool and
+    index lists, and the offsets sentinel (offsets[size] == byte_count) is
+    maintained by add/set_bytes.
     """
     var corpus = List[String]()
     corpus.append(String("hello world"))
@@ -188,7 +188,6 @@ def test_token_table_copy_semantics() raises:
     tok.train(corpus, 300)
 
     var table = tok.token_table
-    assert_true(not table.is_shared())
     assert_true(len(table) > 256)
     assert_equal(table.offsets[len(table)], table.byte_count)
 
@@ -200,18 +199,17 @@ def test_token_table_copy_semantics() raises:
     assert_true(len(table) == before_size)
     assert_true(table.byte_count == before_bytes)
 
-    # Shared mode: copies share storage via an atomic refcount.
-    tok.token_table.shared()
-    assert_true(tok.token_table.is_shared())
-    assert_equal(tok.token_table.ref_count(), 1)
+    # A second copy stays independent too (no sharing).
+    var copy2 = tok.token_table
+    copy2.set_bytes(len(copy2), String("cd").as_bytes())
+    assert_true(len(copy2) == len(tok.token_table) + 1)
+    assert_true(len(tok.token_table) == before_size + 1)
+    assert_equal(tok.token_table.offsets[len(tok.token_table)],
+        tok.token_table.byte_count)
+    assert_equal(copy2.offsets[len(copy2)], copy2.byte_count)
+    assert_equal(tok.token_table.lengths[97], 1)
 
-    var shared = tok.token_table
-    assert_true(shared.is_shared())
-    assert_equal(shared.ref_count(), 2)
-    assert_equal(shared.offsets[len(shared)], shared.byte_count)
-    assert_equal(shared.lengths[97], 1)
-
-    # Tokenizer still decodes correctly while its table is shared.
+    # Tokenizer still decodes correctly after copies.
     assert_equal(tok.decode(tok.encode(String("hello world"))), "hello world")
 
 
