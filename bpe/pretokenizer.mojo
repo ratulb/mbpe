@@ -1483,13 +1483,6 @@ struct GPT2Pretokenizer(PreTokenizer):
             pos += best_len
         return result^
 
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
-        var views = self.split_view(text)
-        var result = List[String](capacity=len(views))
-        for v in views:
-            result.append(String(v))
-        return result^
-
     def write_to[T: Writer](self, mut writer: T):
         writer.write(String("GPT2Pretokenizer"))
 
@@ -2121,13 +2114,6 @@ struct GPT4Pretokenizer[
             var byte_span = span[pos : pos + best_len]
             result.append(StringSlice(unsafe_from_utf8=byte_span))
             pos += best_len
-        return result^
-
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
-        var views = self.split_view(text)
-        var result = List[String](capacity=len(views))
-        for v in views:
-            result.append(String(v))
         return result^
 
     def write_to[T: Writer](self, mut writer: T):

@@ -177,5 +177,43 @@ def test_unicode_roundtrip() raises:
     assert_equal(decoded, "hello world!!!? (안녕하세요!) lol123 😉")
 
 
+def test_token_table_copy_semantics() raises:
+    """Verify TokenByteTable copy semantics: deep copy while unshared,
+    O(1) refcounted copy after shared(), and the offsets sentinel
+    (offsets[size] == byte_count) is maintained by add/set_bytes.
+    """
+    var corpus = List[String]()
+    corpus.append(String("hello world"))
+    var tok = BPETokenizer()
+    tok.train(corpus, 300)
+
+    var table = tok.token_table
+    assert_true(not table.is_shared())
+    assert_true(len(table) > 256)
+    assert_equal(table.offsets[len(table)], table.byte_count)
+
+    # Deep copy is independent: growing the original must not touch it.
+    var before_size = len(table)
+    var before_bytes = table.byte_count
+    tok.token_table.set_bytes(len(tok.token_table), String("ab").as_bytes())
+    assert_true(len(tok.token_table) == before_size + 1)
+    assert_true(len(table) == before_size)
+    assert_true(table.byte_count == before_bytes)
+
+    # Shared mode: copies share storage via an atomic refcount.
+    tok.token_table.shared()
+    assert_true(tok.token_table.is_shared())
+    assert_equal(tok.token_table.ref_count(), 1)
+
+    var shared = tok.token_table
+    assert_true(shared.is_shared())
+    assert_equal(shared.ref_count(), 2)
+    assert_equal(shared.offsets[len(shared)], shared.byte_count)
+    assert_equal(shared.lengths[97], 1)
+
+    # Tokenizer still decodes correctly while its table is shared.
+    assert_equal(tok.decode(tok.encode(String("hello world"))), "hello world")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
