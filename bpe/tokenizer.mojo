@@ -239,23 +239,23 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
     var byte_count: Int
     var bytes: UnsafePointer[Byte, MutAnyOrigin]
     var bytes_cap: Int
-    var offsets: IntArray
-    var lengths: IntArray
+    var offsets: List[Int]
+    var lengths: List[Int]
 
     def __init__(out self):
         self.byte_count = 0
         self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
         self.bytes_cap = 0
-        self.offsets = IntArray()
+        self.offsets = List[Int]()
         self.offsets.append(0)
-        self.lengths = IntArray()
+        self.lengths = List[Int]()
 
     def __init__(out self, *, copy: Self):
         """Deep copy of the byte pool and both index arrays."""
         self.byte_count = copy.byte_count
         self.bytes_cap = copy.byte_count
-        self.offsets = IntArray(copy=copy.offsets)
-        self.lengths = IntArray(copy=copy.lengths)
+        self.offsets = List[Int](copy=copy.offsets)
+        self.lengths = List[Int](copy=copy.lengths)
         if self.byte_count > 0:
             self.bytes = alloc[Byte](self.byte_count)
             memcpy(dest=self.bytes, src=copy.bytes, count=self.byte_count)
