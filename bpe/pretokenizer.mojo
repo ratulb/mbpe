@@ -388,6 +388,111 @@ def is_whitespace(cp: Int) -> Bool:
     )
 
 
+# ── ASCII byte-class LUT ─────────────────────────────────────────────────
+# Bitmask per byte value, used by the matchers' ASCII fast paths to avoid
+# UTF-8 decode + Unicode range checks for the ASCII range (0x00-0x7F).
+# Non-ASCII lead bytes (>= 0x80) have class 0 and fall back to the
+# codepoint-decoding matcher paths.  This is the hot-table for both
+# training and encode pre-tokenization.
+comptime BC_LETTER = 1  # ASCII \p{L}   (A-Z, a-z)
+comptime BC_DIGIT = 2   # ASCII \p{N}   (0-9)
+comptime BC_WS = 4      # ASCII \s      (0x09-0x0D, 0x20)
+comptime BC_CRLF = 8    # CR or LF      (0x0A, 0x0D)
+
+comptime BYTE_CLASS = SIMD[DType.int32, 256](
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 4, 12, 4, 4, 12, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    4, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 0, 0, 0, 0, 0, 0,
+    0, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 0, 0, 0, 0, 0,
+    0, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+)
+
+
+# ── SWAR helpers (ASCII class scan, 8 bytes at a time) ────────────────────
+# These implement the same byte classes as BYTE_CLASS but operate on 8
+# bytes packed into a UInt64, so the letter/digit runs of the ASCII fast
+# paths can be scanned 8x faster than the per-byte LUT loop.  Non-ASCII
+# bytes (>= 0x80) never test as class members, so the SWAR loops stop
+# exactly at the first byte that needs the codepoint-decoding path.
+@always_inline
+def _hasless(x: UInt64, n: UInt64) -> UInt64:
+    return (x - n * UInt64(0x0101010101010101)) & ~x & UInt64(0x8080808080808080)
+
+
+@always_inline
+def _letters8(x: UInt64) -> UInt64:
+    var l = x | UInt64(0x2020202020202020)
+    var below_z = _hasless(l, UInt64(0x7B))
+    var below_a = _hasless(l, UInt64(0x61))
+    return below_z & ~below_a
+
+
+@always_inline
+def _ctpop64(x: UInt64) -> Int:
+    var y = x - ((x >> 1) & UInt64(0x5555555555555555))
+    y = (y & UInt64(0x3333333333333333)) + ((y >> 2) & UInt64(0x3333333333333333))
+    y = (y + (y >> 4)) & UInt64(0x0F0F0F0F0F0F0F0F)
+    return Int((y * UInt64(0x0101010101010101)) >> 56)
+
+
+@always_inline
+def _swar_letter_run(span: Span[UInt8, _], i: Int, n: Int) -> Int:
+    """Consume consecutive ASCII letters starting at i, 8 bytes at a time.
+
+    Returns the number of bytes consumed.  Stops at the first non-letter
+    byte, the first non-ASCII byte (>= 0x80), or end-of-span — matching
+    the semantics of the per-byte \\p{L} scan, just faster.  The caller
+    continues with the codepoint-decoding path for any non-ASCII byte
+    that stopped the scan.
+    """
+    var p8 = span.unsafe_ptr()
+    var consumed = 0
+    var j = i
+    while j + 8 <= n:
+        var w: UInt64 = (p8 + j).bitcast[UInt64]()[]
+        var nl = ~_letters8(w) & UInt64(0x8080808080808080)
+        if nl != 0:
+            var lsb = nl & (UInt64(0) - nl)
+            return consumed + (_ctpop64(lsb - 1) >> 3)
+        consumed += 8
+        j += 8
+    while j < n:
+        var b = span[j]
+        if b < 0x80 and Int(BYTE_CLASS[Int(b)]) & BC_LETTER:
+            consumed += 1
+            j += 1
+        else:
+            break
+    return consumed
+
+
 @always_inline
 def is_ascii_ws_byte(b: Int) -> Bool:
     """Return True if byte b is an ASCII whitespace byte.
@@ -406,14 +511,7 @@ def is_ascii_ws_byte(b: Int) -> Bool:
     This helper exists because the same ASCII-whitespace check is used
     by multiple matchers in both GPT2Pretokenizer and GPT4Pretokenizer.
     """
-    return (
-        b == 0x0009
-        or b == 0x000A
-        or b == 0x000B
-        or b == 0x000C
-        or b == 0x000D
-        or b == 0x0020
-    )
+    return (Int(BYTE_CLASS[b]) & BC_WS) != 0
 
 
 # ===========================================================================
@@ -1332,15 +1430,26 @@ struct GPT2Pretokenizer(PreTokenizer):
         if span[i] == UInt8(32):
             i += 1
         var found = False
+        var n_run = _swar_letter_run(span, i, n)
+        i += n_run
+        if n_run > 0:
+            found = True
         while i < n:
-            var lead = span[i]
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if is_letter(cp):
-                found = True
-                i += cplen
+            var b = span[i]
+            if b < 0x80:
+                if Int(BYTE_CLASS[Int(b)]) & BC_LETTER:
+                    found = True
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_len = utf8_byte_length(b)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_letter(cur_cp):
+                    found = True
+                    i += cur_len
+                else:
+                    break
         if not found:
             return 0
         return i - pos
@@ -1372,14 +1481,21 @@ struct GPT2Pretokenizer(PreTokenizer):
             i += 1
         var found = False
         while i < n:
-            var lead = span[i]
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if is_digit(cp):
-                found = True
-                i += cplen
+            var b = span[i]
+            if b < 0x80:
+                if Int(BYTE_CLASS[Int(b)]) & BC_DIGIT:
+                    found = True
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_len = utf8_byte_length(b)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_digit(cur_cp):
+                    found = True
+                    i += cur_len
+                else:
+                    break
         if not found:
             return 0
         return i - pos
@@ -1411,18 +1527,25 @@ struct GPT2Pretokenizer(PreTokenizer):
             i += 1
         var found = False
         while i < n:
-            var lead = span[i]
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if is_whitespace(cp) or is_letter_or_digit(cp):
-                break
-            found = True
-            i += cplen
+            var b = span[i]
+            if b < 0x80:
+                if Int(BYTE_CLASS[Int(b)]) & (BC_WS | BC_LETTER | BC_DIGIT):
+                    break
+                found = True
+                i += 1
+            else:
+                var cur_len = utf8_byte_length(b)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_whitespace(cur_cp) or is_letter_or_digit(cur_cp):
+                    break
+                found = True
+                i += cur_len
         if not found:
             return 0
         return i - pos
 
     @staticmethod
+    @always_inline
     def _best_match(span: Span[UInt8, _], pos: Int) raises -> Int:
         """Try all 7 matchers left-to-right; return the first match.
 
@@ -1636,20 +1759,35 @@ struct GPT4Pretokenizer[
         if i >= n:
             return 0
         var lead = span[i]
-        var cplen = utf8_byte_length(lead)
-        var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
-            i += cplen
+        if lead < 0x80:
+            if (Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)) == 0:
+                i += 1
+        else:
+            var cplen = utf8_byte_length(lead)
+            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
+                i += cplen
         var found_letters = False
+        var n_run = _swar_letter_run(span, i, n)
+        i += n_run
+        if n_run > 0:
+            found_letters = True
         while i < n:
-            var cur_lead = span[i]
-            var cur_len = utf8_byte_length(cur_lead)
-            var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-            if is_letter(cur_cp):
-                found_letters = True
-                i += cur_len
+            var b = span[i]
+            if b < 0x80:
+                if Int(BYTE_CLASS[Int(b)]) & BC_LETTER:
+                    found_letters = True
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cur_len = utf8_byte_length(b)
+                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                if is_letter(cur_cp):
+                    found_letters = True
+                    i += cur_len
+                else:
+                    break
         if not found_letters:
             return 0
         return i - pos
@@ -1680,14 +1818,21 @@ struct GPT4Pretokenizer[
         var i = pos
         var count = 0
         while i < n and count < 3:
-            var lead = span[i]
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if is_digit(cp):
-                count += 1
-                i += cplen
+            var b = span[i]
+            if b < 0x80:
+                if Int(BYTE_CLASS[Int(b)]) & BC_DIGIT:
+                    count += 1
+                    i += 1
+                else:
+                    break
             else:
-                break
+                var cplen = utf8_byte_length(b)
+                var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+                if is_digit(cp):
+                    count += 1
+                    i += cplen
+                else:
+                    break
         if count == 0:
             return 0
         return i - pos
@@ -1720,13 +1865,19 @@ struct GPT4Pretokenizer[
             i += 1
         var found_punct = False
         while i < n:
-            var lead = span[i]
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if is_whitespace(cp) or is_letter_or_digit(cp):
-                break
-            found_punct = True
-            i += cplen
+            var b = span[i]
+            if b < 0x80:
+                if Int(BYTE_CLASS[Int(b)]) & (BC_WS | BC_LETTER | BC_DIGIT):
+                    break
+                found_punct = True
+                i += 1
+            else:
+                var cplen = utf8_byte_length(b)
+                var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+                if is_whitespace(cp) or is_letter_or_digit(cp):
+                    break
+                found_punct = True
+                i += cplen
         if not found_punct:
             return 0
         while i < n and (span[i] == UInt8(10) or span[i] == UInt8(13)):
@@ -1818,8 +1969,7 @@ struct GPT4Pretokenizer[
         # Optional prefix: [^\r\n\p{L}\p{N}]?
         var lead = span[i]
         if lead < 0x80:
-            var b = Int(lead)
-            if b != 0x0A and b != 0x0D and not ((65 <= b <= 90) or (97 <= b <= 122) or (48 <= b <= 57)):
+            if (Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)) == 0:
                 i += 1
                 if i >= n:
                     return 0
@@ -1894,8 +2044,7 @@ struct GPT4Pretokenizer[
         # Optional prefix: [^\r\n\p{L}\p{N}]?
         var lead = span[i]
         if lead < 0x80:
-            var b = Int(lead)
-            if b != 0x0A and b != 0x0D and not ((65 <= b <= 90) or (97 <= b <= 122) or (48 <= b <= 57)):
+            if (Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)) == 0:
                 i += 1
                 if i >= n:
                     return 0
@@ -1966,10 +2115,7 @@ struct GPT4Pretokenizer[
         while i < n:
             var b = span[i]
             if b < 0x80:
-                var ib = Int(b)
-                var is_ws = ib == 0x09 or ib == 0x0A or ib == 0x0B or ib == 0x0C or ib == 0x0D or ib == 0x20
-                var is_lnd = (65 <= ib <= 90) or (97 <= ib <= 122) or (48 <= ib <= 57)
-                if is_ws or is_lnd:
+                if Int(BYTE_CLASS[Int(b)]) & (BC_WS | BC_LETTER | BC_DIGIT):
                     break
                 found_punct = True
                 i += 1
@@ -2041,6 +2187,7 @@ struct GPT4Pretokenizer[
         return 0
 
     @staticmethod
+    @always_inline
     def _best_match(span: Span[UInt8, _], pos: Int) raises -> Int:
         """Try all matchers left-to-right; return the first match.
 
