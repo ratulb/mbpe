@@ -1,6 +1,7 @@
 # mbpe
 
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
+[![CodeQL](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml)
 
 A **high-performance**, trainable, tiktoken-compatible BPE tokenizer written in **Mojo**.
 The compile-time `PreTokenizer` trait enables GPT-2, GPT-4, GPT-4o and custom tokenization pipelines without changing the core tokenizer.
