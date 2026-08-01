@@ -167,36 +167,36 @@ tok.train((["hello world"]), 300)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **6.9** | **101.8** |
-| mbpe — Python bindings | 1.54M | 5.7 | 55.6 |
-| tiktoken (Python) | 1.54M | 2.6 | 26.1 |
-| tiktoken-rs | 1.53M | 2.4 | 50.1 |
+| **mbpe — Mojo native** | 1.54M | **7.6** | **97.2** |
+| mbpe — Python bindings | 1.54M | 6.1 | 53.5 |
+| tiktoken (Python) | 1.54M | 2.7 | 26.4 |
+| tiktoken-rs | 1.53M | 2.4 | 49.6 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **5.4** | **93.6** |
-| mbpe — Python bindings | 1.28M | 4.4 | 46.0 |
-| tiktoken (Python) | 1.28M | 2.2 | 26.5 |
-| tiktoken-rs | 1.28M | 2.3 | 48.3 |
+| **mbpe — Mojo native** | 1.28M | **6.2** | **88.7** |
+| mbpe — Python bindings | 1.28M | 5.3 | 49.5 |
+| tiktoken (Python) | 1.28M | 2.1 | 24.7 |
+| tiktoken-rs | 1.28M | 2.3 | 48.4 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **4.3** | **91.4** |
-| mbpe — Python bindings | 1.28M | 4.0 | 48.3 |
-| tiktoken (Python) | 1.28M | 3.4 | 25.4 |
+| **mbpe — Mojo native** | 1.28M | **4.6** | **87.5** |
+| mbpe — Python bindings | 1.28M | 4.0 | 48.5 |
+| tiktoken (Python) | 1.28M | 3.3 | 24.7 |
 | tiktoken-rs | 1.28M | 3.6 | 42.8 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 243 ms | 261 ms | 281 ms | 319 ms |
-| Merges/s | 1000 | 2841 | 6204 | 11724 |
-| Encode (M tok/s) | 10.0 | 7.8 | 6.4 | 6.0 |
+| Train time | 198 ms | 194 ms | 208 ms | 239 ms |
+| Merges/s | 1227 | 3830 | 8373 | 15629 |
+| Encode (M tok/s) | 13.8 | 11.3 | 9.3 | 8.1 |
 
 *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
