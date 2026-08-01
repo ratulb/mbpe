@@ -487,7 +487,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     #   1. Pre-tokenise the corpus and count word frequencies.
     #   2. Build the byte→safe-unicode mapping (GPT-2 style).
     #   3. Initialise the vocabulary: bytes 0–255 at IDs 0–255.
-    #   4. Split every word into a list of base token IDs (one per byte).
+    #   4. Split every word into a list of base token IDs (one per byte);
+    #      each distinct word is stored ONCE with its frequency.
     #   5. Repeatedly find the most frequent adjacent pair and merge it,
     #      appending the new token to the vocabulary.
     #
@@ -498,6 +499,12 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     #
     # The loop stops when we reach vocab_size or when no pairs remain
     # (every word has been reduced to a single token).
+    #
+    # Design B (see SYSTEM.md 4.1.9a): words live in per-word token lists
+    # (no SEP, no replication); the `where` map tracks pair → affected word
+    # indices, so each merge scans only the words that contain the pair,
+    # compacting them in place, and pair counts are updated arithmetically
+    # with delta × word frequency instead of rescanning the whole corpus.
     # ─────────────────────────────────────────────────────────────────────
 
     def train[
@@ -538,33 +545,46 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             self.vocab.append(display)
             self.token_table.add(self._display_to_bytes(display))
 
-        # ---- 4. Build flat token-ID sequence with SEP sentinel ------------
-        # Flatten the word-frequency structure into a single List[Int] with
-        # SEP separators between words.  Each word appears `freq` times to
-        # preserve frequency weighting.  Tokens are byte values 0-255.
-        var ids = List[Int]()
+        # ---- 4. Build per-word token-ID lists + initial pair counts -------
+        # Design B (4.1.9a): each distinct word is stored ONCE in
+        # word_tokens (word_freqs iteration order) with its frequency in
+        # word_freq; there is no SEP and no replication — frequency
+        # weighting is applied arithmetically as delta × freq.  `where`
+        # maps a pair key to the indices of the words containing it, so a
+        # merge only touches affected words instead of rescanning the
+        # corpus.  Insertion order of `stats` keys is word order,
+        # left-to-right within a word — identical to the flat design, so
+        # the best-pair tie-break is byte-for-byte reproducible.
+        var word_tokens = List[List[Int]]()
+        var word_freq = List[Int]()
+        var stats = Dict[Int, Int]()
+        var where = Dict[Int, List[Int]]()
         for item in word_freqs.items():
             var word = item.key
             var freq = item.value
+            var wt = List[Int](capacity=len(word.as_bytes()))
             var sb = word.as_bytes()
-            for _ in range(freq):
-                if len(ids) > 0:
-                    ids.append(SEP)
-                for i in range(len(sb)):
-                    ids.append(Self.PT.byte_to_id(Int(sb[i])))
+            for i in range(len(sb)):
+                wt.append(Self.PT.byte_to_id(Int(sb[i])))
+            word_tokens.append(wt^)
+            word_freq.append(freq)
+            var iw = len(word_tokens) - 1
+            for i in range(len(word_tokens[iw]) - 1):
+                var key = (
+                    (word_tokens[iw][i] << ENCODE_SHIFT)
+                    | word_tokens[iw][i + 1]
+                )
+                stats[key] = stats.get(key, 0) + freq
+                if key not in where:
+                    where[key] = List[Int]()
+                where[key].append(iw)
 
-        # ---- 5. Count initial pair frequencies (one pass) -----------------
-        # Pairs involving SEP are skipped (they can never be merged).
-        var stats = Dict[Int, Int]()
-        for i in range(len(ids) - 1):
-            if ids[i] != SEP and ids[i + 1] != SEP:
-                var key = (ids[i] << ENCODE_SHIFT) | ids[i + 1]
-                stats[key] = stats.get(key, 0) + 1
-
-        # ---- 6. Merge loop (incremental pair stats) -----------------------
-        # Each iteration finds the most frequent pair, applies the merge via
-        # a single scan of `ids`, and updates `stats` incrementally (only
-        # the 5 pairs affected per occurrence are adjusted).
+        # ---- 5. Merge loop (per-word where_to_update) ----------------------
+        # Each iteration finds the most frequent pair, then scans ONLY the
+        # words known to contain it, compacting them in place with the same
+        # i += 2 / last-emitted-token semantics as the flat design, and
+        # adjusts `stats` incrementally (the 5 pairs affected per
+        # occurrence, × word frequency).
         self.lookup_table = MergeLookup()
         self.merges = List[MergeRule]()
         while len(self.vocab) < vocab_size:
@@ -583,56 +603,60 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
 
             var a_id = best_pair[0]
             var b_id = best_pair[1]
+            var best_key = (a_id << ENCODE_SHIFT) | b_id
             var merged_id = len(self.vocab)
 
-            # Single scan: apply merge + update stats incrementally.
-            var new_ids = List[Int](capacity=len(ids))
-            var i = 0
-            while i < len(ids):
-                if ids[i] == SEP:
-                    new_ids.append(SEP)
-                    i += 1
-                elif (
-                    i < len(ids) - 1
-                    and ids[i + 1] != SEP
-                    and ids[i] == a_id
-                    and ids[i + 1] == b_id
-                ):
-                    # Decrement destroyed pairs: (prev, a), (a, b), (b, next)
-                    if len(new_ids) > 0 and new_ids[len(new_ids) - 1] != SEP:
-                        var pk = (
-                            new_ids[len(new_ids) - 1] << ENCODE_SHIFT
-                        ) | ids[i]
-                        if pk in stats:
-                            var nv = stats[pk] - 1
-                            stats[pk] = nv if nv > 0 else 0
-                    var mk = (ids[i] << ENCODE_SHIFT) | ids[i + 1]
-                    if mk in stats:
-                        var nv = stats[mk] - 1
-                        stats[mk] = nv if nv > 0 else 0
-                    if i + 2 < len(ids) and ids[i + 2] != SEP:
-                        var nk = (ids[i + 1] << ENCODE_SHIFT) | ids[i + 2]
-                        if nk in stats:
-                            var nv = stats[nk] - 1
-                            stats[nk] = nv if nv > 0 else 0
-
-                    # Increment created pairs: (prev, new_id), (new_id, next)
-                    if len(new_ids) > 0 and new_ids[len(new_ids) - 1] != SEP:
-                        var pk2 = (
-                            new_ids[len(new_ids) - 1] << ENCODE_SHIFT
-                        ) | merged_id
-                        stats[pk2] = stats.get(pk2, 0) + 1
-                    if i + 2 < len(ids) and ids[i + 2] != SEP:
-                        var nk2 = (merged_id << ENCODE_SHIFT) | ids[i + 2]
-                        stats[nk2] = stats.get(nk2, 0) + 1
-
-                    new_ids.append(merged_id)
-                    i += 2
-                else:
-                    new_ids.append(ids[i])
-                    i += 1
-
-            ids = new_ids^
+            # Snapshot the affected-word list; the same key's list is never
+            # appended to during its own merge (created pairs always involve
+            # the brand-new merged_id), so the snapshot length is stable.
+            var snap = len(where[best_key])
+            for wi in range(snap):
+                var iw = where[best_key][wi]
+                var freq = word_freq[iw]
+                ref wt = word_tokens[iw]
+                var w = 0
+                var i = 0
+                var n = len(wt)
+                while i < n:
+                    if i < n - 1 and wt[i] == a_id and wt[i + 1] == b_id:
+                        # Decrement destroyed pairs: (prev, a), (a, b),
+                        # (b, next); prev is the last emitted token.
+                        if w > 0:
+                            var pk = (wt[w - 1] << ENCODE_SHIFT) | wt[i]
+                            if pk in stats:
+                                var nv = stats[pk] - freq
+                                stats[pk] = nv if nv > 0 else 0
+                        var mk = (wt[i] << ENCODE_SHIFT) | wt[i + 1]
+                        if mk in stats:
+                            var nv = stats[mk] - freq
+                            stats[mk] = nv if nv > 0 else 0
+                        if i + 2 < n:
+                            var nk = (wt[i + 1] << ENCODE_SHIFT) | wt[i + 2]
+                            if nk in stats:
+                                var nv = stats[nk] - freq
+                                stats[nk] = nv if nv > 0 else 0
+                        # Increment created pairs: (prev, new_id),
+                        # (new_id, next), and register the word.
+                        if w > 0:
+                            var pk2 = (wt[w - 1] << ENCODE_SHIFT) | merged_id
+                            stats[pk2] = stats.get(pk2, 0) + freq
+                            if pk2 not in where:
+                                where[pk2] = List[Int]()
+                            where[pk2].append(iw)
+                        if i + 2 < n:
+                            var nk2 = (merged_id << ENCODE_SHIFT) | wt[i + 2]
+                            stats[nk2] = stats.get(nk2, 0) + freq
+                            if nk2 not in where:
+                                where[nk2] = List[Int]()
+                            where[nk2].append(iw)
+                        wt[w] = merged_id
+                        w += 1
+                        i += 2
+                    else:
+                        wt[w] = wt[i]
+                        w += 1
+                        i += 1
+                wt.resize(w, 0)
 
             # Record the merge.
             self.merges.append(MergeRule(a_id, b_id, merged_id))
