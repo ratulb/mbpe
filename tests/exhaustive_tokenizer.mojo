@@ -88,13 +88,51 @@ def test_train_on_mixed_languages() raises:
     var decoded = tok.decode(ids)
     assert_equal(decoded, text)
 
+def test_train_on_long_text_sparsed_cjk_language_tokens() raises:
+    """Train and roundtrip text mixing CJK."""
+
+    var long_text = """
+    CJK stands for Chinese, Japanese, and Korean. It's a term used in computing and typography to refer to the shared writing systems of these three East Asian languages.
+
+    Key Points about CJK:
+    Shared Characters: All three languages use (or historically used) Chinese characters (Hanzi in Chinese, Kanji in Japanese, Hanja in Korean).
+
+    Unicode CJK Unified Ideographs: In Unicode, many of these shared characters are "unified" — meaning the same underlying code point is used for characters that are essentially the same across these languages, even if the visual appearance varies slightly between them.
+
+    Examples:
+
+    水 (water) — used in all three languages
+
+    中 (middle/China) — used in all three
+
+    人 (person) — used in all three
+
+    Sometimes CJKV: The "V" stands for Vietnamese, as Vietnamese also historically used Chinese characters (Chữ Nôm).
+
+    Why CJK is Important:
+    Text Processing: These languages don't use spaces between words and have thousands of characters, making text processing different from Latin-based languages.
+
+    Encoding: Historically, CJK characters required special handling in character encodings (like Shift-JIS, Big5, etc.) before Unicode became standard.
+
+    Fonts: CJK fonts need to support thousands of characters, making them much larger than Latin fonts.
+    """
+
+    var corpus = [long_text^]
+    var tok = BPETokenizer()
+    tok.train(corpus, 500)
+    var text = String("水(water), 中 (middle/China), 人 (person)")
+    var ids = tok.encode(text)
+    var decoded = tok.decode(ids)
+    assert_equal(decoded, text)
+
+
 
 def test_train_on_single_character_repeated() raises:
     """Train on repeated single character — verifies degenerate frequency table."""
     var corpus = List[String]()
     corpus.append(String("aaaaaa"))
     var tok = BPETokenizer()
-    tok.train(corpus, 256 + 3)
+    tok.train(corpus, 256 + 4)
     var text = String("aaa")
     var ids = tok.encode(text)
     var decoded = tok.decode(ids)

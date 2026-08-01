@@ -502,7 +502,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         # ---- 1. Pre-tokenise and compute word frequencies ----------------
         var word_freqs = Dict[String, Int]()
         for text in corpus:
-            var words = self.pt.split(text)
+            ref words = self.pt.split(text)
             for word in words:
                 word_freqs[word] = 1 + word_freqs.get(word, 0)
 
