@@ -1,0 +1,10 @@
+[package]
+name = "benchmark_hf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokenizers = { path = "/home/mirikotiirikoti/tokenizers/tokenizers", default-features = false, features = ["onig"] }
+
+[profile.release]
+debug = false

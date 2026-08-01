@@ -48,3 +48,7 @@ build/
 # data files copied into package during PyPI build (originals in data/)
 python-binding/mbpe/data/
 output/
+
+# HF benchmark tokenizer.json (fetch via benchmarks/fetch_hf_data.sh)
+benchmarks/hf_data/
+benchmarks/benchmark_hf/target/
