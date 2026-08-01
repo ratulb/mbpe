@@ -41,6 +41,7 @@ else
 fi
 
 echo "  Building _mbpe.so..." >&2
+rm -f python-binding/mbpe/_mbpe.so
 pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so 2>&1 | tail -1 >&2
 echo "  _mbpe.so built" >&2
 
@@ -50,6 +51,9 @@ echo "── Corpora ──" >&2
 "$VENV_PYTHON" "$BMDIR/generate_corpora.py" >&2
 
 # ── Run benchmarks ───────────────────────────────────────────────
+# Results dir is gitignored scratch: always start from a clean slate so
+# reports can never mix stale JSON from a previous run.
+rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 
 for corpus_spec in "${CORPORA[@]}"; do

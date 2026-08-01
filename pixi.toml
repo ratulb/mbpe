@@ -6,6 +6,7 @@ version = "0.1.0"
 
 # BPE_PT selects the pre-tokenizer: default/gpt2/gpt4 → -D BPE_PT=0/1/2
 [tasks]
+tests = "bash scripts/run_tests.sh"
 benchmark = "bash benchmarks/run.sh"
 benchmark-gpt2 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt2" } }
 benchmark-gpt4 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt4" } }

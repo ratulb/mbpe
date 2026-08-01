@@ -11,15 +11,5 @@ jobs:
           echo "$HOME/.pixi/bin" >> $GITHUB_PATH
       - name: Install dependencies via pixi
         run: pixi install --environment dev
-      - name: Build Mojo shared library
-        run: pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
-      - name: Python tests
-        run: pixi run --environment dev python -m pytest tests/python/ -v --tb=short
-      - name: Python coverage
-        run: pixi run --environment dev python -m pytest tests/python/ --cov=mbpe --cov-report=term-missing
-      - name: Mojo tests (main)
-        run: pixi run mojo main.mojo
-      - name: Mojo tests (tokenizer)
-        run: pixi run mojo -I . tests/test_tokenizer.mojo
-      - name: Mojo tests (exhaustive)
-        run: pixi run mojo -I . tests/exhaustive_tokenizer.mojo
+      - name: Run all tests (builds _mbpe.so from scratch)
+        run: bash scripts/run_tests.sh

@@ -14,6 +14,9 @@ cd "$(dirname "$0")"
 
 CORPUS="${1:-benchmarks/corpus_5MB.txt}"
 RESULTS="benchmarks/results"
+# Results dir is gitignored scratch: always start from a clean slate so
+# the README can never be regenerated from stale JSON.
+rm -rf "$RESULTS"
 mkdir -p "$RESULTS"
 
 # ── Ensure the corpus exists ────────────────────────────────────
@@ -54,6 +57,7 @@ fi
 echo "=== Running benchmarks on: $CORPUS ==="
 
 echo "  Building _mbpe.so..."
+rm -f python-binding/mbpe/_mbpe.so
 pixi run mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
 
 echo "  1/5  Mojo native (pre-trained encode/decode only)..."
