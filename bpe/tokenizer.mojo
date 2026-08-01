@@ -38,6 +38,7 @@ from std.atomic import Atomic, Ordering, fence
 from std.sys import size_of
 from std.base64 import b64encode, b64decode
 from std.os.env import getenv
+from std.collections.binary_heap import BinaryHeap
 
 from bpe.pretokenizer import (
     PreTokenizer,
@@ -131,6 +132,14 @@ comptime CACHE_ENTRIES: Int = 1 << (CACHE_SHIFT * 2)
 comptime ENCODE_SHIFT: Int = 20
 comptime ENCODE_MASK: Int = (1 << ENCODE_SHIFT) - 1
 comptime SEP: Int = -1
+# Heap candidates pack (rank, position) into one Int: rank << HEAP_SHIFT | idx.
+# rank < 2^24 (vocab ≤ ~200K) and idx < 2^24 (word byte length); the key is
+# negated when pushed because BinaryHeap pops the maximum.
+comptime HEAP_SHIFT: Int = 24
+comptime HEAP_MASK: Int = (1 << HEAP_SHIFT) - 1
+# Words shorter than this are merged with the tight scan loop; longer words
+# use the heap-driven merge (measured crossover on real corpora).
+comptime SCAN_LIMIT: Int = 32
 
 
 struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
@@ -669,40 +678,146 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         if total_bytes == 0:
             return List[Int]()
 
-        # ---- 3. Single allocation + per-word merge ----------------------
+        # ---- 3. Single allocation + per-word heap-driven merge -----------
+        # Each word is a linked list (prev/next arrays) over its token nodes.
+        # A min-heap of candidates drives the greedy merge: pop the lowest-
+        # rank pair, splice it in O(1), and re-push only the two pairs
+        # touching the merge site.  O(N log N) instead of the O(N^2) full-
+        # scan-per-merge of the original encoder.
+        #
+        # Heap keys pack (rank, position) into a single Int: rank << 24 | idx.
+        # BinaryHeap is a max-heap, so the key is negated — the popped key
+        # then yields the lowest rank, breaking ties by lowest position
+        # (identical to the scan-based selection order).
+        #
+        # All scratch buffers are raw allocations reused across words; the
+        # BinaryHeap retains its capacity between words, so steady-state
+        # encoding does zero allocation.
         var result = List[Int]()
         result.resize(total_bytes, 0)
         var write_pos = 0
+        var ids_buf = alloc[Int](0)
+        var nxt_buf = alloc[Int](0)
+        var prv_buf = alloc[Int](0)
+        var alive_buf = alloc[UInt8](0)
+        var cap = 0
+        var heap = BinaryHeap[Int]()
         for word in words:
             var ptr = word.unsafe_ptr()
             var n = word.byte_length()
             var dst = result.unsafe_ptr() + write_pos
 
             # Copy bytes as Ints (via PT byte mapping)
+            if n < 2:
+                for i in range(n):
+                    comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
+                        dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
+                    else:
+                        dst[i] = self.byte_to_rank[Int(ptr[i])]
+                write_pos += n
+                continue
+
+            # Short words: tight scan-based greedy merge (O(n^2) is cheaper
+            # than heap bookkeeping at this size).
+            if n < SCAN_LIMIT:
+                for i in range(n):
+                    comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
+                        dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
+                    else:
+                        dst[i] = self.byte_to_rank[Int(ptr[i])]
+                var len = n
+                while len >= 2:
+                    var best_rank = -1
+                    var best_a = -1
+                    var best_b = -1
+                    var best_m = -1
+                    for i in range(len - 1):
+                        var merged = self.lookup_table.get(dst[i], dst[i + 1])
+                        if merged >= 0 and (best_rank < 0 or merged < best_rank):
+                            best_rank = merged
+                            best_a = dst[i]
+                            best_b = dst[i + 1]
+                            best_m = merged
+                    if best_rank < 0:
+                        break
+                    len = merge_inplace(dst, len, best_a, best_b, best_m)
+                write_pos += len
+                continue
+
+            # Long words: heap-driven merge (O(N log N)).
+            if n > cap:
+                ids_buf.free()
+                nxt_buf.free()
+                prv_buf.free()
+                alive_buf.free()
+                ids_buf = alloc[Int](n)
+                nxt_buf = alloc[Int](n)
+                prv_buf = alloc[Int](n)
+                alive_buf = alloc[UInt8](n)
+                cap = n
+
             for i in range(n):
                 comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
-                    dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
+                    ids_buf[i] = Self.PT.byte_to_id(Int(ptr[i]))
                 else:
-                    dst[i] = self.byte_to_rank[Int(ptr[i])]
+                    ids_buf[i] = self.byte_to_rank[Int(ptr[i])]
+                nxt_buf[i] = i + 1
+                prv_buf[i] = i - 1
+                alive_buf[i] = 1
+            nxt_buf[n - 1] = -1
 
-            # Greedy lowest-rank merge loop
-            while n >= 2:
-                var best_rank = -1
-                var best_a = -1
-                var best_b = -1
-                var best_m = -1
-                for i in range(n - 1):
-                    var merged = self.lookup_table.get(dst[i], dst[i + 1])
-                    if merged >= 0 and (best_rank < 0 or merged < best_rank):
-                        best_rank = merged
-                        best_a = dst[i]
-                        best_b = dst[i + 1]
-                        best_m = merged
-                if best_rank < 0:
-                    break
-                n = merge_inplace(dst, n, best_a, best_b, best_m)
+            # Seed the heap with every initially mergeable pair.
+            for i in range(n - 1):
+                var r0 = self.lookup_table.get(ids_buf[i], ids_buf[i + 1])
+                if r0 >= 0:
+                    heap.push(-(r0 << HEAP_SHIFT | i))
 
-            write_pos += n
+            # Greedy lowest-rank merge (lazy-validated heap).
+            while len(heap) > 0:
+                var key = -heap.pop()
+                var e = key & HEAP_MASK
+                var rank = key >> HEAP_SHIFT
+                if alive_buf[e] == 0:
+                    continue
+                var j = nxt_buf[e]
+                if j < 0:
+                    continue
+                # Revalidate: the pair may have changed since it was pushed.
+                if self.lookup_table.get(ids_buf[e], ids_buf[j]) != rank:
+                    continue
+
+                # Merge: node e absorbs node j (e stays, j is spliced out).
+                ids_buf[e] = rank
+                var k = nxt_buf[j]
+                if k >= 0:
+                    prv_buf[k] = e
+                nxt_buf[e] = k
+                alive_buf[j] = 0
+
+                # Only the two pairs touching the merge site can change.
+                var p = prv_buf[e]
+                if p >= 0:
+                    var rp = self.lookup_table.get(ids_buf[p], ids_buf[e])
+                    if rp >= 0:
+                        heap.push(-(rp << HEAP_SHIFT | p))
+                if k >= 0:
+                    var rk = self.lookup_table.get(ids_buf[e], ids_buf[k])
+                    if rk >= 0:
+                        heap.push(-(rk << HEAP_SHIFT | e))
+
+            # Emit surviving nodes in order (node 0 is never consumed).
+            var count = 0
+            var cur = 0
+            while cur >= 0:
+                dst[count] = ids_buf[cur]
+                count += 1
+                cur = nxt_buf[cur]
+            write_pos += count
+
+        ids_buf.free()
+        nxt_buf.free()
+        prv_buf.free()
+        alive_buf.free()
 
         # Trim to actual used size
         result.resize(write_pos, 0)
