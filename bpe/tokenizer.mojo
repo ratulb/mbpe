@@ -33,9 +33,7 @@ References
 """
 
 from std.pathlib import Path
-from std.memory import alloc, memcpy
-from std.atomic import Atomic, Ordering, fence
-from std.sys import size_of
+from std.memory import memcpy
 from std.base64 import b64encode, b64decode
 from std.os.env import getenv
 from std.collections.binary_heap import BinaryHeap
@@ -145,63 +143,41 @@ comptime SCAN_LIMIT: Int = 32
 
 
 struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
-    """Reference-counted two-tier merge-lookup cache.
+    """Two-tier merge-lookup cache.
 
-    Layout (one contiguous allocation):
-      [Atomic[UInt64] refcount (8 bytes)]  [Int × CACHE_ENTRIES data (8 MB)]
-
-    Copying bumps the refcount — the flat array is shared, not duplicated.
-    The last drop frees the entire block.  _slow is always owned (deep-copied).
+    _fast is a flat List[Int] (1024 × 1024), index = (a << 10) | b;
+    copies are deep (List has no refcounted sharing).  _slow is always
+    owned (deep-copied).
     """
 
-    var _fast: UnsafePointer[Int, MutAnyOrigin]
-    var _refcount: UnsafePointer[Atomic[DType.uint64], MutAnyOrigin]
+    var _fast: List[Int]
     var _slow: Dict[Int, Int]
 
-    comptime REFCOUNT_BYTES: Int = size_of[Atomic[DType.uint64]]()
-    comptime ALLOC_BYTES: Int = size_of[
-        Atomic[DType.uint64]
-    ]() + CACHE_ENTRIES * size_of[Int]()
-
     def __init__(out self):
-        var alloc_ptr = alloc[Byte](Self.ALLOC_BYTES)
-        self._refcount = alloc_ptr.bitcast[Atomic[DType.uint64]]()
-        self._refcount[] = Atomic[DType.uint64](1)
-        self._fast = (alloc_ptr + Self.REFCOUNT_BYTES).bitcast[Int]()
-        for i in range(CACHE_ENTRIES):
-            self._fast[i] = -1
+        self._fast = List[Int](length=CACHE_ENTRIES, fill=-1)
         self._slow = Dict[Int, Int]()
 
     def __init__(out self, *, copy: Self):
         """Implement Copyable trait."""
-        self._fast = copy._fast
-        self._refcount = copy._refcount
-        _ = self._refcount[].fetch_add[ordering=Ordering.RELAXED](1)
+        self._fast = List[Int](copy=copy._fast)
         self._slow = copy._slow.copy()
 
     def __init__(out self, *, deinit move: Self):
         """Implement Movable trait."""
-        self._fast = move._fast
-        self._refcount = move._refcount
+        self._fast = move._fast^
         self._slow = move._slow^
-
-    def __del__(deinit self):
-        if self._refcount[].fetch_sub[ordering=Ordering.RELEASE](1) != 1:
-            return
-        fence[ordering=Ordering.ACQUIRE]()
-        self._refcount.bitcast[Byte]().free()
 
     @always_inline
     def set(mut self, id1: Int, id2: Int, merged_id: Int):
         if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
-            self._fast[(id1 << CACHE_SHIFT) | id2] = merged_id
+            self._fast.unsafe_ptr()[(id1 << CACHE_SHIFT) | id2] = merged_id
         else:
             self._slow[(id1 << ENCODE_SHIFT) | id2] = merged_id
 
     @always_inline
     def get(self, id1: Int, id2: Int) -> Int:
         if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
-            return self._fast[(id1 << CACHE_SHIFT) | id2]
+            return self._fast.unsafe_ptr()[(id1 << CACHE_SHIFT) | id2]
         return self._slow.get((id1 << ENCODE_SHIFT) | id2, -1)
 
     def write_to[T: Writer](self, mut writer: T):
@@ -220,76 +196,46 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
 #   token i's bytes live at bytes[offsets[i] : offsets[i] + lengths[i]]
 #
 # Memory model:
-#   - The byte pool is the only large allocation, kept as a raw
-#     UnsafePointer (amortised doubling).  The index arrays are
-#     IntArray (heap-backed, deep-copy) exposing the same
-#     unsafe_ptr() API the decode hot path used with List.
+#   - The byte pool is a flat List[Byte] (heap-backed, amortised growth),
+#     exposing the unsafe_ptr() API the decode hot path uses.
+#   - The index arrays are List[Int] for the same reason — raw-pointer
+#     access via unsafe_ptr().
 #   - Copies are deep (ImplicitlyCopyable); refcounting was dropped
 #     because the index arrays cannot be shared cheaply.
 #
 # Invariants:
 #   len(lengths) == len(vocab) in BPETokenizer
 #   after finish(): len(offsets) == len(lengths) + 1, and
-#   offsets[len(lengths)] == byte_count  (sentinel — read by
+#   offsets[len(lengths)] == len(bytes)  (sentinel — read by
 #   benchmarks/profile_decode.mojo via offsets[id + 1])
 # ---------------------------------------------------------------------------
 
 
 struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
-    var byte_count: Int
-    var bytes: UnsafePointer[Byte, MutAnyOrigin]
-    var bytes_cap: Int
+    var bytes: List[Byte]
     var offsets: List[Int]
     var lengths: List[Int]
 
     def __init__(out self):
-        self.byte_count = 0
-        self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
-        self.bytes_cap = 0
+        self.bytes = List[Byte]()
         self.offsets = List[Int]()
         self.offsets.append(0)
         self.lengths = List[Int]()
 
     def __init__(out self, *, copy: Self):
         """Deep copy of the byte pool and both index arrays."""
-        self.byte_count = copy.byte_count
-        self.bytes_cap = copy.byte_count
+        self.bytes = List[Byte](copy=copy.bytes)
         self.offsets = List[Int](copy=copy.offsets)
         self.lengths = List[Int](copy=copy.lengths)
-        if self.byte_count > 0:
-            self.bytes = alloc[Byte](self.byte_count)
-            memcpy(dest=self.bytes, src=copy.bytes, count=self.byte_count)
-        else:
-            self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
 
     def __init__(out self, *, deinit move: Self):
-        self.byte_count = move.byte_count
-        self.bytes = move.bytes
-        self.bytes_cap = move.bytes_cap
+        self.bytes = move.bytes^
         self.offsets = move.offsets^
         self.lengths = move.lengths^
-
-    def __del__(deinit self):
-        if self.bytes_cap > 0:
-            self.bytes.free()
 
     @always_inline
     def __len__(self) -> Int:
         return len(self.lengths)
-
-    @always_inline
-    def _ensure_bytes_cap(mut self, needed: Int):
-        if needed <= self.bytes_cap:
-            return
-        var new_cap = needed
-        if new_cap < 2 * self.bytes_cap:
-            new_cap = 2 * self.bytes_cap
-        var new_ptr = alloc[Byte](new_cap)
-        if self.bytes_cap > 0:
-            memcpy(dest=new_ptr, src=self.bytes, count=self.byte_count)
-            self.bytes.free()
-        self.bytes = new_ptr
-        self.bytes_cap = new_cap
 
     @always_inline
     def reserve(mut self, max_tokens: Int):
@@ -299,46 +245,36 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
     @always_inline
     def add(mut self, raw: Span[Byte, _]):
         """Append a token's raw bytes."""
-        var new_count = self.byte_count + len(raw)
-        self._ensure_bytes_cap(new_count)
         var new_size = len(self.lengths) + 1
         self.offsets.append(0)
         self.lengths.append(0)
-        self.offsets[new_size - 1] = self.byte_count
-        memcpy(
-            dest=self.bytes + self.byte_count,
-            src=raw.unsafe_ptr(),
-            count=len(raw),
-        )
+        self.offsets[new_size - 1] = len(self.bytes)
+        self.bytes.reserve(len(self.bytes) + len(raw))
+        for i in range(len(raw)):
+            self.bytes.append(raw[i])
         self.lengths[new_size - 1] = len(raw)
-        self.byte_count = new_count
-        self.offsets[new_size] = self.byte_count
+        self.offsets[new_size] = len(self.bytes)
 
     @always_inline
     def set_bytes(mut self, id: Int, raw: Span[Byte, _]):
         """Register a token at an exact id, padding gaps with empty tokens."""
         while len(self.lengths) <= id:
-            self.offsets.append(self.byte_count)
+            self.offsets.append(len(self.bytes))
             self.lengths.append(0)
         if len(self.offsets) == len(self.lengths):
-            self.offsets.append(self.byte_count)
-        var new_count = self.byte_count + len(raw)
-        self._ensure_bytes_cap(new_count)
-        self.offsets[id] = self.byte_count
-        memcpy(
-            dest=self.bytes + self.byte_count,
-            src=raw.unsafe_ptr(),
-            count=len(raw),
-        )
+            self.offsets.append(len(self.bytes))
+        self.offsets[id] = len(self.bytes)
+        self.bytes.reserve(len(self.bytes) + len(raw))
+        for i in range(len(raw)):
+            self.bytes.append(raw[i])
         self.lengths[id] = len(raw)
-        self.byte_count = new_count
-        self.offsets[len(self.offsets) - 1] = self.byte_count
+        self.offsets[len(self.offsets) - 1] = len(self.bytes)
 
     @always_inline
     def finish(mut self):
         """Append the sentinel offset (== total bytes), if not already present."""
         if len(self.offsets) == len(self.lengths):
-            self.offsets.append(self.byte_count)
+            self.offsets.append(len(self.bytes))
 
 
 # ---------------------------------------------------------------------------
@@ -951,7 +887,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             return String("")
         var result = String(unsafe_uninit_length=total)
         var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
-        var ptr = self.token_table.bytes.as_noalias_ptr()
+        var ptr = self.token_table.bytes.unsafe_ptr().as_noalias_ptr()
         var write_offset: Int = 0
         for id in ids:
             var n = lens[id]
@@ -988,7 +924,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         var result = ByteSequence(capacity=total)
         result.resize(total, 0)
         var dst = result.unsafe_ptr()
-        var src = self.token_table.bytes.as_noalias_ptr()
+        var src = self.token_table.bytes.unsafe_ptr().as_noalias_ptr()
         var write_offset: Int = 0
         for id in ids:
             var n = lens[id]
@@ -1004,7 +940,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         if n == 0:
             return ByteSequence()
         var off = self.token_table.offsets.unsafe_ptr()[id]
-        var ptr = self.token_table.bytes.as_noalias_ptr()
+        var ptr = self.token_table.bytes.unsafe_ptr().as_noalias_ptr()
         var result = ByteSequence(capacity=n)
         result.resize(n, 0)
         memcpy(dest=result.unsafe_ptr(), src=ptr + off, count=n)
@@ -1029,7 +965,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             return String("")
         var result = String(unsafe_uninit_length=total)
         var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
-        var ptr = self.token_table.bytes.as_noalias_ptr()
+        var ptr = self.token_table.bytes.unsafe_ptr().as_noalias_ptr()
         var write_offset: Int = 0
         for id in ids:
             var n = lens[id]
@@ -1044,7 +980,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         var result = List[ByteSequence](capacity=len(self.token_table))
         var lens = self.token_table.lengths.unsafe_ptr()
         var offs = self.token_table.offsets.unsafe_ptr()
-        var ptr = self.token_table.bytes.as_noalias_ptr()
+        var ptr = self.token_table.bytes.unsafe_ptr().as_noalias_ptr()
         for i in range(len(self.token_table)):
             var n = lens[i]
             var bytes = ByteSequence(capacity=n)

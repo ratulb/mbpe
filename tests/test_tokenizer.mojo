@@ -179,7 +179,7 @@ def test_unicode_roundtrip() raises:
 
 def test_token_table_copy_semantics() raises:
     """Verify TokenByteTable copy semantics: deep copy of the byte pool and
-    index lists, and the offsets sentinel (offsets[size] == byte_count) is
+    index lists, and the offsets sentinel (offsets[size] == len(bytes)) is
     maintained by add/set_bytes.
     """
     var corpus = List[String]()
@@ -189,15 +189,15 @@ def test_token_table_copy_semantics() raises:
 
     var table = tok.token_table
     assert_true(len(table) > 256)
-    assert_equal(table.offsets[len(table)], table.byte_count)
+    assert_equal(table.offsets[len(table)], len(table.bytes))
 
     # Deep copy is independent: growing the original must not touch it.
     var before_size = len(table)
-    var before_bytes = table.byte_count
+    var before_bytes = len(table.bytes)
     tok.token_table.set_bytes(len(tok.token_table), String("ab").as_bytes())
     assert_true(len(tok.token_table) == before_size + 1)
     assert_true(len(table) == before_size)
-    assert_true(table.byte_count == before_bytes)
+    assert_true(len(table.bytes) == before_bytes)
 
     # A second copy stays independent too (no sharing).
     var copy2 = tok.token_table
@@ -205,8 +205,8 @@ def test_token_table_copy_semantics() raises:
     assert_true(len(copy2) == len(tok.token_table) + 1)
     assert_true(len(tok.token_table) == before_size + 1)
     assert_equal(tok.token_table.offsets[len(tok.token_table)],
-        tok.token_table.byte_count)
-    assert_equal(copy2.offsets[len(copy2)], copy2.byte_count)
+        len(tok.token_table.bytes))
+    assert_equal(copy2.offsets[len(copy2)], len(copy2.bytes))
     assert_equal(tok.token_table.lengths[97], 1)
 
     # Tokenizer still decodes correctly after copies.
