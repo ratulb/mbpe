@@ -46,6 +46,7 @@ from bpe.pretokenizer import (
     GPT2Pretokenizer,
     GPT4Pretokenizer,
     ByteMapping,
+    WordCounts,
 )
 from bpe.array import IntArray, ByteArray
 
@@ -517,11 +518,14 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                 " vocabulary"
             )
         # ---- 1. Pre-tokenise and compute word frequencies ----------------
-        var word_freqs = Dict[String, Int]()
+        # Fused single pass: the matcher hands each word span (ptr, len)
+        # straight to WordCounts, which hashes the bytes in place — no
+        # String materialization, no per-word allocation, no Dict.  Order
+        # is first-seen (the same guarantee as Dict's insertion order),
+        # so the tie-break below is byte-for-byte unchanged.
+        var word_counts = WordCounts()
         for text in corpus:
-            ref words = self.pt.split(text)
-            for word in words:
-                word_freqs[word] = 1 + word_freqs.get(word, 0)
+            self.pt.count_words(text, word_counts)
 
         # ---- 2. Build byte ↔ safe-Unicode mapping -----------------------
         # (initialized in __init__ — nothing to do here)
@@ -562,26 +566,27 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         # The merge loop compacts in place through a raw pointer into the
         # arena (no per-word List allocation — one alloc per training run).
         var total_tokens: Int = 0
-        for item in word_freqs.items():
-            total_tokens += item.key.byte_length()
+        for ei in word_counts.order:
+            total_tokens += word_counts.lengths[ei]
         var arena = IntArray.with_capacity(total_tokens)
-        var word_offs = IntArray.with_capacity(len(word_freqs))
-        var word_len = IntArray.with_capacity(len(word_freqs))
-        var word_freq = IntArray.with_capacity(len(word_freqs))
+        var word_offs = IntArray.with_capacity(word_counts.n_entries)
+        var word_len = IntArray.with_capacity(word_counts.n_entries)
+        var word_freq = IntArray.with_capacity(word_counts.n_entries)
         var stats = Dict[Int, Int]()
         var where = Dict[Int, List[Int]]()
-        for item in word_freqs.items():
-            var word = item.key
-            var freq = item.value
-            var off = len(arena)
-            word_offs.append(off)
-            var sb = word.as_bytes()
-            for i in range(len(sb)):
-                arena.append(Self.PT.byte_to_id(Int(sb[i])))
-            word_len.append(len(sb))
+        var wb = word_counts.bytes.unsafe_ptr()
+        for ei in word_counts.order:
+            var off = word_counts.offsets[ei]
+            var ln = word_counts.lengths[ei]
+            var freq = word_counts.counts[ei]
+            var off_arena = len(arena)
+            word_offs.append(off_arena)
+            for i in range(ln):
+                arena.append(Self.PT.byte_to_id(Int(wb[off + i])))
+            word_len.append(ln)
             word_freq.append(freq)
             var iw = len(word_offs) - 1
-            for i in range(off, off + len(sb) - 1):
+            for i in range(off_arena, off_arena + ln - 1):
                 var key = (
                     (arena[i] << ENCODE_SHIFT)
                     | arena[i + 1]

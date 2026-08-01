@@ -1062,11 +1062,136 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
     0x9B,
     0x9C,
     0x9D,
-    0x9E,  # rank 245-252
+     0x9E,  # rank 245-252
     0x9F,
     0xA0,
     0xAD,  # rank 253-255
 )
+
+# ===========================================================================
+# WordCounts — fused word-frequency table for training
+# ===========================================================================
+#
+# train() used to materialize every word as a String and count frequencies
+# in a Dict[String, Int] — one heap allocation per word plus string-keyed
+# hashing, on top of the split chain.  WordCounts fuses counting into the
+# matcher pass: the matcher hands it a (pointer, length) span, it hashes
+# the bytes in place (zero copies) and increments the count in an
+# open-addressing table.  Iteration order is first-seen order, kept in an
+# explicit `order` array — the same guarantee as Dict's documented
+# insertion order — so merge tie-breaking stays byte-for-byte reproducible.
+
+from bpe.array import IntArray, ByteArray
+
+
+@always_inline
+def _fnv1a64(ptr: UnsafePointer[UInt8, _], n: Int) -> UInt64:
+    var h: UInt64 = UInt64(0xCBF29CE484222325)
+    for i in range(n):
+        h ^= UInt64(ptr[i])
+        h *= UInt64(0x100000001B3)
+    return h
+
+
+@always_inline
+def _bytes_eq(
+    a: UnsafePointer[UInt8, _], b: UnsafePointer[UInt8, _], n: Int
+) -> Bool:
+    for i in range(n):
+        if a[i] != b[i]:
+            return False
+    return True
+
+
+struct WordCounts:
+    """Insertion-ordered word -> frequency table keyed by raw bytes.
+
+    Fields (all public; train() walks them directly when building the
+    per-word arena):
+
+        slots     open-addressing hash: slot -> entry index + 1 (0 = empty)
+        offsets   entry -> byte offset of the word inside `bytes`
+        lengths   entry -> word byte length
+        counts    entry -> frequency
+        order     entry indices in first-seen order
+        bytes     flat arena holding every unique word's bytes exactly once
+    """
+
+    var slots: IntArray
+    var offsets: IntArray
+    var lengths: IntArray
+    var counts: IntArray
+    var order: IntArray
+    var bytes: ByteArray
+    var n_entries: Int
+    var slot_cap: Int
+
+    def __init__(out self, capacity: Int = 4096):
+        var cap = 16
+        while cap < capacity * 4:
+            cap *= 2
+        self.slot_cap = cap
+        self.slots = IntArray.with_capacity(cap)
+        for i in range(cap):
+            self.slots.append(0)
+        self.offsets = IntArray.with_capacity(capacity)
+        self.lengths = IntArray.with_capacity(capacity)
+        self.counts = IntArray.with_capacity(capacity)
+        self.order = IntArray.with_capacity(capacity)
+        self.bytes = ByteArray()
+        self.n_entries = 0
+
+    def _rehash(mut self, new_cap: Int):
+        var old = self.slots
+        self.slots = IntArray.with_capacity(new_cap)
+        for i in range(new_cap):
+            self.slots.append(0)
+        self.slot_cap = new_cap
+        var nsp = self.slots.unsafe_ptr()
+        var bp = self.bytes.unsafe_ptr()
+        for e in range(self.n_entries):
+            var h = _fnv1a64(bp + self.offsets[e], self.lengths[e])
+            var idx = Int(h & UInt64(new_cap - 1))
+            while nsp[idx] != 0:
+                idx = (idx + 1) & (new_cap - 1)
+            nsp[idx] = e + 1
+        # `old` is dropped at end of scope (frees its allocation)
+
+    def add(mut self, ptr: UnsafePointer[UInt8, _], length: Int):
+        if length == 0:
+            return
+        if self.n_entries * 2 >= self.slot_cap:
+            self._rehash(self.slot_cap * 2)
+        var h = _fnv1a64(ptr, length)
+        var sp = self.slots.unsafe_ptr()
+        var idx = Int(h & UInt64(self.slot_cap - 1))
+        while sp[idx] != 0:
+            var e = sp[idx] - 1
+            if (
+                self.lengths[e] == length
+                and _bytes_eq(self.bytes.unsafe_ptr() + self.offsets[e], ptr, length)
+            ):
+                self.counts[e] += 1
+                return
+            idx = (idx + 1) & (self.slot_cap - 1)
+        var e = self.n_entries
+        var boff = len(self.bytes)
+        self.bytes.reserve(boff + length)
+        for i in range(length):
+            self.bytes.append(ptr[i])
+        sp[idx] = e + 1
+        self.offsets.append(boff)
+        self.lengths.append(length)
+        self.counts.append(1)
+        self.order.append(e)
+        self.n_entries += 1
+
+    def add(mut self, span: Span[UInt8, _]):
+        self.add(span.unsafe_ptr(), len(span))
+
+    def add(mut self, start: UnsafePointer[UInt8, _], pos: Int, length: Int):
+        self.add(start + pos, length)
+
 
 
 trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
@@ -1088,7 +1213,8 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         split
           Returns owned String copies.  Default implementation wraps
           split_view into String allocations.  Used by train() where
-          words become Dict keys.
+          words become Dict keys (legacy — train() now uses
+          count_words, which never materializes words).
 
     Pre-tokenizers that only slice the input (GPT-2 r50k_base, GPT-4
     cl100k_base / o200k_base) override split_view for maximum encode
@@ -1162,13 +1288,30 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         Override directly when the pre-tokenizer transforms the input
         (e.g., GPreTokenizer inserts spacers).
 
-        Used by train() where words become Dict keys.
+        Legacy API — train() uses count_words() (below), which never
+        materializes words.
         """
         var views = self.split_view(text)
         var result = List[String](capacity=len(views))
         for v in views:
             result.append(String(v))
         return result^
+
+    def count_words[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+        """Count word frequencies in one fused pass over ``text``.
+
+        The training hot path: instead of split() + Dict[String, Int]
+        counting (one String allocation per word), the matcher hands each
+        word span straight to ``counts``, which hashes the bytes in place.
+        The default implementation delegates to split_view; GPT2Pretokenizer
+        and GPT4Pretokenizer override with an inlined matcher loop, and
+        GPreTokenizer overrides via its transforming split.
+        """
+        var views = self.split_view(text)
+        for v in views:
+            counts.add(v.as_bytes())
 
     @staticmethod
     def name() -> String:
@@ -1328,6 +1471,17 @@ struct GPreTokenizer(PreTokenizer):
 
     def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
         return Self.tokenize(text)
+
+    def count_words[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+        # GPre transforms text (spacer insertion), so words can't be
+        # sliced out of the input — reuse the tested transform split and
+        # feed the resulting display strings into the counter.  Correctness
+        # is inherited from tokenize(); GPre is not the benchmarked path.
+        var words = Self.tokenize(text)
+        for w in words:
+            counts.add(w.as_bytes())
 
     def write_to[T: Writer](self, mut writer: T):
         writer.write(String("GPreTokenizer"))
@@ -1605,6 +1759,26 @@ struct GPT2Pretokenizer(PreTokenizer):
             result.append(StringSlice(unsafe_from_utf8=byte_span))
             pos += best_len
         return result^
+
+    def count_words[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+        """Fused word counting: same matcher loop as split_view, but each
+        matched span goes straight into ``counts`` — no StringSlice list,
+        no String materialization.
+        """
+        var n = text.byte_length()
+        if n == 0:
+            return
+        var span = text.as_bytes()
+        var sp = span.unsafe_ptr()
+        var pos = 0
+        while pos < n:
+            var best_len = GPT2Pretokenizer._best_match(span, pos)
+            if best_len == 0:
+                best_len = utf8_byte_length(sp[pos])
+            counts.add(sp + pos, best_len)
+            pos += best_len
 
     def write_to[T: Writer](self, mut writer: T):
         writer.write(String("GPT2Pretokenizer"))
@@ -2262,6 +2436,26 @@ struct GPT4Pretokenizer[
             result.append(StringSlice(unsafe_from_utf8=byte_span))
             pos += best_len
         return result^
+
+    def count_words[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+        """Fused word counting: same matcher loop as split_view, but each
+        matched span goes straight into ``counts`` — no StringSlice list,
+        no String materialization.
+        """
+        var n = text.byte_length()
+        if n == 0:
+            return
+        var span = text.as_bytes()
+        var sp = span.unsafe_ptr()
+        var pos = 0
+        while pos < n:
+            var best_len = Self._best_match(span, pos)
+            if best_len == 0:
+                best_len = utf8_byte_length(sp[pos])
+            counts.add(sp + pos, best_len)
+            pos += best_len
 
     def write_to[T: Writer](self, mut writer: T):
         writer.write(String("GPT4Pretokenizer"))
