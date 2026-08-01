@@ -47,6 +47,7 @@ from bpe.pretokenizer import (
     GPT4Pretokenizer,
     ByteMapping,
 )
+from bpe.array import IntArray, ByteArray
 
 
 # ---------------------------------------------------------------------------
@@ -219,12 +220,11 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
 #
 # Memory model:
 #   - The byte pool is the only large allocation, kept as a raw
-#     UnsafePointer (amortised doubling).  The index arrays stay
-#     List[Int] so decode keeps origin-based no-alias proofs via
-#     List.unsafe_ptr() — interleaved benchmarks measured raw pointers
-#     for all three arrays 5-26% slower than this hybrid.
+#     UnsafePointer (amortised doubling).  The index arrays are
+#     IntArray (heap-backed, deep-copy) exposing the same
+#     unsafe_ptr() API the decode hot path used with List.
 #   - Copies are deep (ImplicitlyCopyable); refcounting was dropped
-#     because the index Lists cannot be shared cheaply.
+#     because the index arrays cannot be shared cheaply.
 #
 # Invariants:
 #   len(lengths) == len(vocab) in BPETokenizer
@@ -238,23 +238,23 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
     var byte_count: Int
     var bytes: UnsafePointer[Byte, MutAnyOrigin]
     var bytes_cap: Int
-    var offsets: List[Int]
-    var lengths: List[Int]
+    var offsets: IntArray
+    var lengths: IntArray
 
     def __init__(out self):
         self.byte_count = 0
         self.bytes = UnsafePointer[Byte, MutAnyOrigin].unsafe_dangling()
         self.bytes_cap = 0
-        self.offsets = List[Int]()
+        self.offsets = IntArray()
         self.offsets.append(0)
-        self.lengths = List[Int]()
+        self.lengths = IntArray()
 
     def __init__(out self, *, copy: Self):
-        """Deep copy of the byte pool and both index lists."""
+        """Deep copy of the byte pool and both index arrays."""
         self.byte_count = copy.byte_count
         self.bytes_cap = copy.byte_count
-        self.offsets = List[Int](copy=copy.offsets)
-        self.lengths = List[Int](copy=copy.lengths)
+        self.offsets = IntArray(copy=copy.offsets)
+        self.lengths = IntArray(copy=copy.lengths)
         if self.byte_count > 0:
             self.bytes = alloc[Byte](self.byte_count)
             memcpy(dest=self.bytes, src=copy.bytes, count=self.byte_count)
@@ -397,7 +397,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     var lookup_table: MergeLookup
     var byte_to_cp: Dict[Int, Int]
     var cp_to_byte: Dict[Int, Int]
-    var byte_to_rank: List[Int]
+    var byte_to_rank: IntArray
     var token_table: TokenByteTable
     var special_bytes: Dict[String, Int]
     var inverse_special: Dict[Int, String]
@@ -409,7 +409,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         self.lookup_table = MergeLookup()
         self.byte_to_cp = Dict[Int, Int]()
         self.cp_to_byte = Dict[Int, Int]()
-        self.byte_to_rank = List[Int](capacity=256)
+        self.byte_to_rank = IntArray.with_capacity(256)
         for b in range(256):
             self.byte_to_rank.append(b)
         self.token_table = TokenByteTable()
@@ -500,11 +500,12 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
     # The loop stops when we reach vocab_size or when no pairs remain
     # (every word has been reduced to a single token).
     #
-    # Design B (see SYSTEM.md 4.1.9a): words live in per-word token lists
-    # (no SEP, no replication); the `where` map tracks pair → affected word
-    # indices, so each merge scans only the words that contain the pair,
-    # compacting them in place, and pair counts are updated arithmetically
-    # with delta × word frequency instead of rescanning the whole corpus.
+    # Design B (see SYSTEM.md 4.1.9a): words live in a flat IntArray arena
+    # (no SEP, no replication, one allocation per training run); the `where`
+    # map tracks pair → affected word indices, so each merge scans only the
+    # words that contain the pair, compacting them in place, and pair counts
+    # are updated arithmetically with delta × word frequency instead of
+    # rescanning the whole corpus.
     # ─────────────────────────────────────────────────────────────────────
 
     def train[
@@ -536,7 +537,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         self.vocab = Vocabulary(capacity=vocab_size)
         self.token_table = TokenByteTable()
         self.token_table.reserve(vocab_size)
-        self.byte_to_rank = List[Int](capacity=256)
+        self.byte_to_rank = IntArray.with_capacity(256)
         for b in range(256):
             self.byte_to_rank.append(b)
         for rank in range(256):
@@ -545,9 +546,9 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             self.vocab.append(display)
             self.token_table.add(self._display_to_bytes(display))
 
-        # ---- 4. Build per-word token-ID lists + initial pair counts -------
-        # Design B (4.1.9a): each distinct word is stored ONCE in
-        # word_tokens (word_freqs iteration order) with its frequency in
+        # ---- 4. Build per-word token-ID storage + initial pair counts -------
+        # Design B (4.1.9a): each distinct word is stored ONCE in a flat
+        # token arena (word_freqs iteration order) with its frequency in
         # word_freq; there is no SEP and no replication — frequency
         # weighting is applied arithmetically as delta × freq.  `where`
         # maps a pair key to the indices of the words containing it, so a
@@ -555,24 +556,35 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         # corpus.  Insertion order of `stats` keys is word order,
         # left-to-right within a word — identical to the flat design, so
         # the best-pair tie-break is byte-for-byte reproducible.
-        var word_tokens = List[List[Int]]()
-        var word_freq = List[Int]()
+        #
+        # Storage: `arena` is one flat IntArray holding every word's token
+        # IDs back-to-back; word i occupies arena[offs[i]:offs[i]+len[i]].
+        # The merge loop compacts in place through a raw pointer into the
+        # arena (no per-word List allocation — one alloc per training run).
+        var total_tokens: Int = 0
+        for item in word_freqs.items():
+            total_tokens += item.key.byte_length()
+        var arena = IntArray.with_capacity(total_tokens)
+        var word_offs = IntArray.with_capacity(len(word_freqs))
+        var word_len = IntArray.with_capacity(len(word_freqs))
+        var word_freq = IntArray.with_capacity(len(word_freqs))
         var stats = Dict[Int, Int]()
         var where = Dict[Int, List[Int]]()
         for item in word_freqs.items():
             var word = item.key
             var freq = item.value
-            var wt = List[Int](capacity=len(word.as_bytes()))
+            var off = len(arena)
+            word_offs.append(off)
             var sb = word.as_bytes()
             for i in range(len(sb)):
-                wt.append(Self.PT.byte_to_id(Int(sb[i])))
-            word_tokens.append(wt^)
+                arena.append(Self.PT.byte_to_id(Int(sb[i])))
+            word_len.append(len(sb))
             word_freq.append(freq)
-            var iw = len(word_tokens) - 1
-            for i in range(len(word_tokens[iw]) - 1):
+            var iw = len(word_offs) - 1
+            for i in range(off, off + len(sb) - 1):
                 var key = (
-                    (word_tokens[iw][i] << ENCODE_SHIFT)
-                    | word_tokens[iw][i + 1]
+                    (arena[i] << ENCODE_SHIFT)
+                    | arena[i + 1]
                 )
                 stats[key] = stats.get(key, 0) + freq
                 if key not in where:
@@ -613,10 +625,11 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             for wi in range(snap):
                 var iw = where[best_key][wi]
                 var freq = word_freq[iw]
-                ref wt = word_tokens[iw]
+                var start = word_offs[iw]
+                var n = word_len[iw]
+                var wt = arena.unsafe_ptr() + start
                 var w = 0
                 var i = 0
-                var n = len(wt)
                 while i < n:
                     if i < n - 1 and wt[i] == a_id and wt[i + 1] == b_id:
                         # Decrement destroyed pairs: (prev, a), (a, b),
@@ -656,7 +669,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                         wt[w] = wt[i]
                         w += 1
                         i += 1
-                wt.resize(w, 0)
+                word_len[iw] = w
 
             # Record the merge.
             self.merges.append(MergeRule(a_id, b_id, merged_id))
@@ -726,6 +739,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         var alive_buf = alloc[UInt8](0)
         var cap = 0
         var heap = BinaryHeap[Int]()
+        var btr = self.byte_to_rank.unsafe_ptr()
         for word in words:
             var ptr = word.unsafe_ptr()
             var n = word.byte_length()
@@ -737,7 +751,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                     comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
                         dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
                     else:
-                        dst[i] = self.byte_to_rank[Int(ptr[i])]
+                        dst[i] = btr[Int(ptr[i])]
                 write_pos += n
                 continue
 
@@ -748,7 +762,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                     comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
                         dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
                     else:
-                        dst[i] = self.byte_to_rank[Int(ptr[i])]
+                        dst[i] = btr[Int(ptr[i])]
                 var len = n
                 while len >= 2:
                     var best_rank = -1
@@ -784,7 +798,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                 comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
                     ids_buf[i] = Self.PT.byte_to_id(Int(ptr[i]))
                 else:
-                    ids_buf[i] = self.byte_to_rank[Int(ptr[i])]
+                    ids_buf[i] = btr[Int(ptr[i])]
                 nxt_buf[i] = i + 1
                 prv_buf[i] = i - 1
                 alive_buf[i] = 1
