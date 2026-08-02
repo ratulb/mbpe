@@ -1131,21 +1131,18 @@ struct WordCounts:
         while cap < capacity * 4:
             cap *= 2
         self.slot_cap = cap
-        self.slots = IntArray.with_capacity(cap)
+        self.slots = IntArray(capacity=cap)
         for _ in range(cap):
             self.slots.append(0)
-        self.offsets = IntArray.with_capacity(capacity)
-        self.lengths = IntArray.with_capacity(capacity)
-        self.counts = IntArray.with_capacity(capacity)
-        self.order = IntArray.with_capacity(capacity)
+        self.offsets = IntArray(capacity=capacity)
+        self.lengths = IntArray(capacity=capacity)
+        self.counts = IntArray(capacity=capacity)
+        self.order = IntArray(capacity=capacity)
         self.bytes = ByteArray()
         self.n_entries = 0
 
     def _rehash(mut self, new_cap: Int):
-        var old = self.slots
-        self.slots = IntArray.with_capacity(new_cap)
-        for _ in range(new_cap):
-            self.slots.append(0)
+        self.slots = IntArray(length=new_cap, fill=0)
         self.slot_cap = new_cap
         var nsp = self.slots.unsafe_ptr()
         var bp = self.bytes.unsafe_ptr()
