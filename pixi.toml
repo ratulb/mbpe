@@ -10,7 +10,7 @@ tests = "bash scripts/run_tests.sh"
 benchmark = "bash benchmarks/run.sh"
 benchmark-gpt2 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt2" } }
 benchmark-gpt4 = { cmd = "bash benchmarks/run.sh", env = { BPE_PT = "gpt4" } }
-gen-refs = "python benchmarks/reference_splits.py benchmarks/corpus.txt benchmarks/ref_splits.json && python -c \"import json; d=json.load(open('benchmarks/ref_splits.json')); json.dump({k: d[k] for k in ['text','n_gpre','n_gpt2','n_gpt4']}, open('benchmarks/ref_counts.json','w'), ensure_ascii=False)\""
+gen-refs = "pixi run --environment dev python benchmarks/reference_splits.py benchmarks/corpus.txt benchmarks/ref_splits.json && pixi run --environment dev python -c \"import json; d=json.load(open('benchmarks/ref_splits.json')); json.dump({k: d[k] for k in ['text','n_gpre','n_gpt2','n_gpt4']}, open('benchmarks/ref_counts.json','w'), ensure_ascii=False)\""
 
 [dependencies]
 python = ">=3.14.6,<3.15"
@@ -19,6 +19,7 @@ gcc = ">=15.2.0,<15.3"
 
 [feature.dev.pypi-dependencies]
 tiktoken = "*"
+regex = "*"
 
 [feature.dev.dependencies]
 pytest = ">=9.1.1,<10"
