@@ -109,6 +109,8 @@ FILE STRUCTURE
 # The helpers are marked @always_inline because they're called from
 # hot loops -- inlining eliminates function-call overhead.
 
+from std.bit import pop_count
+
 
 @always_inline
 def utf8_byte_length(lead: UInt8) -> Int:
@@ -136,7 +138,9 @@ def utf8_byte_length(lead: UInt8) -> Int:
 
 
 @always_inline
-def decode_codepoint(ptr: UnsafePointer[UInt8, _], length: Int) -> Int:
+def decode_codepoint[
+    origin: Origin, //
+](ptr: UnsafePointer[UInt8, origin], length: Int) -> Int:
     """Decode a single Unicode codepoint from raw UTF-8 bytes.
 
     Reads `length` bytes from `ptr` and reconstructs the codepoint.
@@ -248,7 +252,8 @@ def is_letter_or_digit(cp: Int) -> Bool:
 
 @always_inline
 def is_lowercase(cp: Int) -> Bool:
-    """Return True if cp is a Unicode lowercase letter (like \\p{Ll} in regex)."""
+    """Return True if cp is a Unicode lowercase letter (like \\p{Ll} in regex).
+    """
     if cp < 128:
         return 97 <= cp <= 122
     # Latin-1 Supplement lowercase
@@ -295,8 +300,12 @@ def is_mark(cp: Int) -> Bool:
         (0x0300 <= cp and cp <= 0x036F)  # Combining Diacritical Marks
         or (0x0483 <= cp and cp <= 0x0489)  # Cyrillic
         or (0x0591 <= cp and cp <= 0x05BD)  # Hebrew
-        or cp == 0x05BF or cp == 0x05C1 or cp == 0x05C2
-        or cp == 0x05C4 or cp == 0x05C5 or cp == 0x05C7
+        or cp == 0x05BF
+        or cp == 0x05C1
+        or cp == 0x05C2
+        or cp == 0x05C4
+        or cp == 0x05C5
+        or cp == 0x05C7
         or (0x0610 <= cp and cp <= 0x061A)  # Arabic
         or (0x064B <= cp and cp <= 0x065F)
         or cp == 0x0670
@@ -306,13 +315,17 @@ def is_mark(cp: Int) -> Bool:
         or (0x06EA <= cp and cp <= 0x06ED)
         or (0x0711 <= cp and cp <= 0x074A)  # Syriac
         or (0x0901 <= cp and cp <= 0x0903)  # Devanagari
-        or cp == 0x093C or (0x093E <= cp and cp <= 0x094D)
+        or cp == 0x093C
+        or (0x093E <= cp and cp <= 0x094D)
         or (0x0951 <= cp and cp <= 0x0954)
         or (0x0962 <= cp and cp <= 0x0963)
         or (0x0981 <= cp and cp <= 0x0983)  # Bengali
-        or cp == 0x09BC or (0x09BE <= cp and cp <= 0x09C4)
-        or cp == 0x09C7 or cp == 0x09C8
-        or (0x09CB <= cp and cp <= 0x09CD) or cp == 0x09D7
+        or cp == 0x09BC
+        or (0x09BE <= cp and cp <= 0x09C4)
+        or cp == 0x09C7
+        or cp == 0x09C8
+        or (0x09CB <= cp and cp <= 0x09CD)
+        or cp == 0x09D7
         or (0x09E2 <= cp and cp <= 0x09E3)
         or (0x0E31 <= cp and cp <= 0x0E3A)  # Thai
         or (0x0E47 <= cp and cp <= 0x0E4E)
@@ -321,11 +334,14 @@ def is_mark(cp: Int) -> Bool:
         or (0x0F90 <= cp and cp <= 0x0FBC)
         or (0x102B <= cp and cp <= 0x103E)  # Myanmar
         or (0x17B6 <= cp and cp <= 0x17D3)  # Khmer
-        or (0x1DC0 <= cp and cp <= 0x1DFF)  # Combining Diacritical Marks Supplement
+        or (
+            0x1DC0 <= cp and cp <= 0x1DFF
+        )  # Combining Diacritical Marks Supplement
         or (0x20D0 <= cp and cp <= 0x20F0)  # Combining Marks for Symbols
         or (0xFE00 <= cp and cp <= 0xFE0F)  # Variation Selectors
         or (0xFE20 <= cp and cp <= 0xFE2F)  # Combining Half Marks
-        or cp == 0x200C or cp == 0x200D  # ZWJ/ZWNJ
+        or cp == 0x200C
+        or cp == 0x200D  # ZWJ/ZWNJ
     )
 
 
@@ -340,7 +356,9 @@ def is_upper_like(cp: Int) -> Bool:
     """
     if cp < 128:
         return 65 <= cp <= 90
-    return (is_letter(cp) and not is_lowercase(cp) and not is_digit(cp)) or is_mark(cp)
+    return (
+        is_letter(cp) and not is_lowercase(cp) and not is_digit(cp)
+    ) or is_mark(cp)
 
 
 @always_inline
@@ -395,9 +413,9 @@ def is_whitespace(cp: Int) -> Bool:
 # codepoint-decoding matcher paths.  This is the hot-table for both
 # training and encode pre-tokenization.
 comptime BC_LETTER = 1  # ASCII \p{L}   (A-Z, a-z)
-comptime BC_DIGIT = 2   # ASCII \p{N}   (0-9)
-comptime BC_WS = 4      # ASCII \s      (0x09-0x0D, 0x20)
-comptime BC_CRLF = 8    # CR or LF      (0x0A, 0x0D)
+comptime BC_DIGIT = 2  # ASCII \p{N}   (0-9)
+comptime BC_WS = 4  # ASCII \s      (0x09-0x0D, 0x20)
+comptime BC_CRLF = 8  # CR or LF      (0x0A, 0x0D)
 
 comptime BYTE_CLASS = SIMD[DType.int32, 256](
     0, 0, 0, 0, 0, 0, 0, 0,
@@ -435,6 +453,7 @@ comptime BYTE_CLASS = SIMD[DType.int32, 256](
 )
 
 
+
 # ── SWAR helpers (ASCII class scan, 8 bytes at a time) ────────────────────
 # These implement the same byte classes as BYTE_CLASS but operate on 8
 # bytes packed into a UInt64, so the letter/digit runs of the ASCII fast
@@ -443,7 +462,9 @@ comptime BYTE_CLASS = SIMD[DType.int32, 256](
 # exactly at the first byte that needs the codepoint-decoding path.
 @always_inline
 def _hasless(x: UInt64, n: UInt64) -> UInt64:
-    return (x - n * UInt64(0x0101010101010101)) & ~x & UInt64(0x8080808080808080)
+    return (
+        (x - n * UInt64(0x0101010101010101)) & ~x & UInt64(0x8080808080808080)
+    )
 
 
 @always_inline
@@ -457,13 +478,17 @@ def _letters8(x: UInt64) -> UInt64:
 @always_inline
 def _ctpop64(x: UInt64) -> Int:
     var y = x - ((x >> 1) & UInt64(0x5555555555555555))
-    y = (y & UInt64(0x3333333333333333)) + ((y >> 2) & UInt64(0x3333333333333333))
+    y = (y & UInt64(0x3333333333333333)) + (
+        (y >> 2) & UInt64(0x3333333333333333)
+    )
     y = (y + (y >> 4)) & UInt64(0x0F0F0F0F0F0F0F0F)
     return Int((y * UInt64(0x0101010101010101)) >> 56)
 
 
 @always_inline
-def _swar_letter_run(span: Span[UInt8, _], i: Int, n: Int) -> Int:
+def _swar_letter_run[
+    origin: Origin, //
+](span: Span[UInt8, origin], i: Int, n: Int) -> Int:
     """Consume consecutive ASCII letters starting at i, 8 bytes at a time.
 
     Returns the number of bytes consumed.  Stops at the first non-letter
@@ -480,7 +505,8 @@ def _swar_letter_run(span: Span[UInt8, _], i: Int, n: Int) -> Int:
         var nl = ~_letters8(w) & UInt64(0x8080808080808080)
         if nl != 0:
             var lsb = nl & (UInt64(0) - nl)
-            return consumed + (_ctpop64(lsb - 1) >> 3)
+            # return consumed + (_ctpop64(lsb - 1) >> 3)
+            return consumed + (pop_count(lsb - 1).__int__() >> 3)
         consumed += 8
         j += 8
     while j < n:
@@ -551,55 +577,13 @@ struct ByteMapping(ImplicitlyCopyable & Equatable):
 # O200K_ID_TO_BYTE[token_rank] = byte_value
 
 comptime O200K_BYTE_TO_ID = SIMD[DType.int32, 256](
-    188,
-    189,
-    190,
-    191,
-    192,
-    193,
-    194,
-    195,  # 0x00-0x07
-    196,
-    197,
-    198,
-    199,
-    200,
-    201,
-    202,
-    203,  # 0x08-0x0F
-    204,
-    205,
-    206,
-    207,
-    208,
-    209,
-    210,
-    211,  # 0x10-0x17
-    212,
-    213,
-    214,
-    215,
-    216,
-    217,
-    218,
-    219,  # 0x18-0x1F
+    188, 189, 190, 191, 192, 193, 194, 195,  # 0x00-0x07
+    196, 197, 198, 199, 200, 201, 202, 203,  # 0x08-0x0F
+    204, 205, 206, 207, 208, 209, 210, 211,  # 0x10-0x17
+    212, 213, 214, 215, 216, 217, 218, 219,  # 0x18-0x1F
     220,  # 0x20 (space)
-    0,
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,  # 0x21-0x28
-    8,
-    9,
-    10,
-    11,
-    12,
-    13,
-    14,
-    15,  # 0x29-0x30
+    0, 1, 2, 3, 4, 5, 6, 7,  # 0x21-0x28
+    8, 9, 10, 11, 12, 13, 14, 15,  # 0x29-0x30
     16,
     17,
     18,
@@ -1062,7 +1046,7 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
     0x9B,
     0x9C,
     0x9D,
-     0x9E,  # rank 245-252
+    0x9E,  # rank 245-252
     0x9F,
     0xA0,
     0xAD,  # rank 253-255
@@ -1085,7 +1069,9 @@ from bpe.array import IntArray, ByteArray
 
 
 @always_inline
-def _fnv1a64(ptr: UnsafePointer[UInt8, _], n: Int) -> UInt64:
+def _fnv1a64[
+    origin: Origin, //
+](ptr: UnsafePointer[UInt8, origin], n: Int) -> UInt64:
     var h: UInt64 = UInt64(0xCBF29CE484222325)
     for i in range(n):
         h ^= UInt64(ptr[i])
@@ -1094,8 +1080,10 @@ def _fnv1a64(ptr: UnsafePointer[UInt8, _], n: Int) -> UInt64:
 
 
 @always_inline
-def _bytes_eq(
-    a: UnsafePointer[UInt8, _], b: UnsafePointer[UInt8, _], n: Int
+def _bytes_eq[
+    origin_1: Origin, origin_2: Origin, //
+](
+    a: UnsafePointer[UInt8, origin_1], b: UnsafePointer[UInt8, origin_2], n: Int
 ) -> Bool:
     for i in range(n):
         if a[i] != b[i]:
@@ -1154,7 +1142,9 @@ struct WordCounts:
             nsp[idx] = e + 1
         # `old` is dropped at end of scope (frees its allocation)
 
-    def add(mut self, ptr: UnsafePointer[UInt8, _], length: Int):
+    def add[
+        origin: Origin, //
+    ](mut self, ptr: UnsafePointer[UInt8, origin], length: Int):
         if length == 0:
             return
         if self.n_entries * 2 >= self.slot_cap:
@@ -1164,9 +1154,8 @@ struct WordCounts:
         var idx = Int(h & UInt64(self.slot_cap - 1))
         while sp[idx] != 0:
             var e = sp[idx] - 1
-            if (
-                self.lengths[e] == length
-                and _bytes_eq(self.bytes.unsafe_ptr() + self.offsets[e], ptr, length)
+            if self.lengths[e] == length and _bytes_eq(
+                self.bytes.unsafe_ptr() + self.offsets[e], ptr, length
             ):
                 self.counts[e] += 1
                 return
@@ -1183,12 +1172,13 @@ struct WordCounts:
         self.order.append(e)
         self.n_entries += 1
 
-    def add(mut self, span: Span[UInt8, _]):
+    def add[origin: Origin, //](mut self, span: Span[UInt8, origin]):
         self.add(span.unsafe_ptr(), len(span))
 
-    def add(mut self, start: UnsafePointer[UInt8, _], pos: Int, length: Int):
+    def add[
+        origin: Origin, //
+    ](mut self, start: UnsafePointer[UInt8, origin], pos: Int, length: Int):
         self.add(start + pos, length)
-
 
 
 trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
@@ -1257,9 +1247,9 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         """
         return rank
 
-    def split_view[mut: Bool, //, origin: Origin[mut=mut]](
-        self, text: StringSlice[origin]
-    ) raises -> List[StringSlice[origin]]:
+    def split_view[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
         """Split text into zero-copy word views.
 
         Returns views into the original ``text`` — no per-word heap
@@ -1278,7 +1268,9 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         result.append(text)
         return result^
 
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
+    def split[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin]) raises -> List[String]:
         """Split text into owned word strings.
 
         Default implementation wraps split_view into String allocations.
@@ -1324,7 +1316,9 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     # letter/digit/punct runs, newlines) remain on each concrete struct.
 
     @staticmethod
-    def match_trailing_all_ws(span: Span[UInt8, _], pos: Int) -> Int:
+    def match_trailing_all_ws[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match alternative 5: \\s++$.
 
         Matches if ALL remaining bytes from pos to end-of-string are
@@ -1349,7 +1343,9 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         return count
 
     @staticmethod
-    def match_ws_not_before_nonws(span: Span[UInt8, _], pos: Int) -> Int:
+    def match_ws_not_before_nonws[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match whitespace run where the byte AFTER is also whitespace (or EOS).
 
         Approximates the regex negative lookahead (?!\\S).  Scans the
@@ -1381,7 +1377,9 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         return 0
 
     @staticmethod
-    def match_single_ws(span: Span[UInt8, _], pos: Int) -> Int:
+    def match_single_ws[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match a single ASCII whitespace byte.
 
         Catch-all fallback for whitespace bytes not matched by the
@@ -1466,7 +1464,9 @@ struct GPreTokenizer(PreTokenizer):
             result.append(String(from_utf8=split.as_bytes()))
         return result^
 
-    def split[mut: Bool, //, origin: Origin[mut=mut]](self, text: StringSlice[origin]) raises -> List[String]:
+    def split[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin]) raises -> List[String]:
         return Self.tokenize(text)
 
     def count_words[
@@ -1521,7 +1521,9 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     @staticmethod
     @always_inline
-    def _match_contraction(span: Span[UInt8, _], pos: Int) -> Int:
+    def _match_contraction[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match alternative 1: '(?:[sdmt]|ll|ve|re).
 
         Looks for a leading apostrophe (byte 0x27), then checks for
@@ -1557,7 +1559,9 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     @staticmethod
     @always_inline
-    def _match_letter_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_letter_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match alternative 2:  ?\\p{L}++.
 
         Consumes an optional ASCII space (0x20), then greedily consumes
@@ -1607,7 +1611,9 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     @staticmethod
     @always_inline
-    def _match_digit_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_digit_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match alternative 3:  ?\\p{N}++.
 
         Consumes an optional ASCII space (0x20), then greedily consumes
@@ -1653,7 +1659,9 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     @staticmethod
     @always_inline
-    def _match_punct_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_punct_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match alternative 4:  ?[^\\s\\p{L}\\p{N}]++.
 
         Consumes an optional ASCII space (0x20), then greedily consumes
@@ -1697,7 +1705,9 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     @staticmethod
     @always_inline
-    def _best_match(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _best_match[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Try all 7 matchers left-to-right; return the first match.
 
         Implements regex alternation: matchers are tried in order
@@ -1734,9 +1744,9 @@ struct GPT2Pretokenizer(PreTokenizer):
             return m
         return Self.match_single_ws(span, pos)
 
-    def split_view[mut: Bool, //, origin: Origin[mut=mut]](
-        self, text: StringSlice[origin]
-    ) raises -> List[StringSlice[origin]]:
+    def split_view[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
         """Split text into zero-copy word views (GPT-2 r50k_base).
 
         No per-word heap allocation — each entry is a view into the
@@ -1864,7 +1874,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_contraction(span: Span[UInt8, _], pos: Int) -> Int:
+    def _match_contraction[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match alternative 1: '(?i:[sdmt]|ll|ve|re).
 
         Same as GPT-2 but case-insensitive: letters in the contraction
@@ -1900,7 +1912,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_letter_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_letter_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match alternative 2: [^\\r\\n\\p{L}\\p{N}]?+\\p{L}++.
 
         Unlike GPT-2's "optional space + letters", this matcher allows
@@ -1931,7 +1945,9 @@ struct GPT4Pretokenizer[
             return 0
         var lead = span[i]
         if lead < 0x80:
-            if (Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)) == 0:
+            if (
+                Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)
+            ) == 0:
                 i += 1
         else:
             var cplen = utf8_byte_length(lead)
@@ -1965,7 +1981,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_digit_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_digit_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match alternative 3: \\p{N}{1,3}+.
 
         Matches 1 to 3 consecutive Unicode digits.  No space prefix
@@ -2010,7 +2028,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_punct_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_punct_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match alternative 4:  ?[^\\s\\p{L}\\p{N}]++[\\r\\n]*+.
 
         Like GPT-2 alt 4 but with a key addition: trailing CR and LF
@@ -2057,7 +2077,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_newline(span: Span[UInt8, _], pos: Int) -> Int:
+    def _match_newline[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match alternative 6: \\s*[\\r\\n].
 
         Matches optional leading ASCII whitespace then exactly one CR
@@ -2123,7 +2145,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_o200k_alt1(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_o200k_alt1[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match o200k alternative 1: letter run with at least one lowercase.
 
         [^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*
@@ -2140,7 +2164,9 @@ struct GPT4Pretokenizer[
         # Optional prefix: [^\r\n\p{L}\p{N}]?
         var lead = span[i]
         if lead < 0x80:
-            if (Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)) == 0:
+            if (
+                Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)
+            ) == 0:
                 i += 1
                 if i >= n:
                     return 0
@@ -2195,7 +2221,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_o200k_alt2(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_o200k_alt2[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match o200k alternative 2: letter run with at least one uppercase.
 
         [^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+
@@ -2215,7 +2243,9 @@ struct GPT4Pretokenizer[
         # Optional prefix: [^\r\n\p{L}\p{N}]?
         var lead = span[i]
         if lead < 0x80:
-            if (Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)) == 0:
+            if (
+                Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)
+            ) == 0:
                 i += 1
                 if i >= n:
                     return 0
@@ -2270,7 +2300,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_o200k_punct_run(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _match_o200k_punct_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Match o200k alternative 4:  ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*.
 
         Like cl100k alt 4 but trailing CR/LF/slash are consumed via
@@ -2301,13 +2333,17 @@ struct GPT4Pretokenizer[
         if not found_punct:
             return 0
         # Trailing CR, LF, or slash
-        while i < n and (span[i] == UInt8(10) or span[i] == UInt8(13) or span[i] == UInt8(47)):
+        while i < n and (
+            span[i] == UInt8(10) or span[i] == UInt8(13) or span[i] == UInt8(47)
+        ):
             i += 1
         return i - pos
 
     @staticmethod
     @always_inline
-    def _match_o200k_ws_run(span: Span[UInt8, _], pos: Int) -> Int:
+    def _match_o200k_ws_run[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match o200k alternative 7: \\s+ — one or more ASCII whitespace bytes.
 
         Unlike cl100k's final \\s (single byte), o200k uses \\s+ to consume
@@ -2325,7 +2361,9 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
-    def _match_o200k_newline(span: Span[UInt8, _], pos: Int) -> Int:
+    def _match_o200k_newline[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match o200k alternative 5: \\s*[\\r\\n]+.
 
         Like cl100k alt 6 but requires 1+ CR/LF characters, not exactly 1.
@@ -2352,14 +2390,18 @@ struct GPT4Pretokenizer[
             i -= 1
             if span[i] == UInt8(10) or span[i] == UInt8(13):
                 var j = i
-                while j < ws_end and (span[j] == UInt8(10) or span[j] == UInt8(13)):
+                while j < ws_end and (
+                    span[j] == UInt8(10) or span[j] == UInt8(13)
+                ):
                     j += 1
                 return j - pos
         return 0
 
     @staticmethod
     @always_inline
-    def _best_match(span: Span[UInt8, _], pos: Int) raises -> Int:
+    def _best_match[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) raises -> Int:
         """Try all matchers left-to-right; return the first match.
 
         Uses cl100k_base (8 alt) or o200k_base (7 alt) depending on
@@ -2411,9 +2453,9 @@ struct GPT4Pretokenizer[
                 return m
             return Self.match_single_ws(span, pos)
 
-    def split_view[mut: Bool, //, origin: Origin[mut=mut]](
-        self, text: StringSlice[origin]
-    ) raises -> List[StringSlice[origin]]:
+    def split_view[
+        mut: Bool, //, origin: Origin[mut=mut]
+    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
         """Split text into zero-copy word views (GPT-4 cl100k_base).
 
         No per-word heap allocation — each entry is a view into the
