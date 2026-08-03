@@ -1230,6 +1230,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     comptime byte_map: ByteMapping
 
     @staticmethod
+    @always_inline
     def byte_to_id(b: Int) -> Int:
         """Convert a raw byte value (0-255) to its base token rank.
 
@@ -1239,6 +1240,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         return b
 
     @staticmethod
+    @always_inline
     def id_to_byte(rank: Int) -> Int:
         """Convert a base token rank (0-255) back to its raw byte value.
 
