@@ -110,6 +110,7 @@ FILE STRUCTURE
 # hot loops -- inlining eliminates function-call overhead.
 
 from std.bit import pop_count
+from std.memory import memcmp
 
 
 @always_inline
@@ -1067,43 +1068,97 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
 
 from bpe.array import IntArray, ByteArray
 
-
-@always_inline
-def _fnv1a64[
-    origin: Origin, //
-](ptr: UnsafePointer[UInt8, origin], n: Int) -> UInt64:
-    var h: UInt64 = UInt64(0xCBF29CE484222325)
-    for i in range(n):
-        h ^= UInt64(ptr[i])
-        h *= UInt64(0x100000001B3)
-    return h
-
-
-@always_inline
-def _bytes_eq[
-    origin_1: Origin, origin_2: Origin, //
-](
-    a: UnsafePointer[UInt8, origin_1], b: UnsafePointer[UInt8, origin_2], n: Int
-) -> Bool:
-    for i in range(n):
-        if a[i] != b[i]:
-            return False
-    return True
-
-
-struct WordCounts:
+struct WordCounts(ImplicitlyCopyable & Movable):
     """Insertion-ordered word -> frequency table keyed by raw bytes.
+
+    Purpose:
+        Counts word frequencies during BPE training without the cost of
+        Dict[String, Int] -- no heap allocation per word, no String
+        construction, no string-keyed hashing. Instead, callers hand this
+        struct raw (pointer, length) byte spans directly from the source
+        text; it hashes those bytes in place (zero copies of the word
+        itself happen until it's confirmed to be new) and tracks counts
+        in a custom open-addressing hash table.
+
+    How it works, at a glance:
+        Every UNIQUE word gets one "entry" -- an integer index 0, 1, 2, ...
+        assigned in first-seen order. An entry's data is spread across
+        four parallel arrays, all indexed by that same entry number:
+
+            entry e's word bytes  = bytes[offsets[e] : offsets[e]+lengths[e]]
+            entry e's frequency   = counts[e]
+
+        `slots` is a separate open-addressing hash table (linear probing)
+        that maps a word's hash to its entry number, so add() can find an
+        existing word in O(1) average time instead of scanning every
+        entry. `order` records entries in the order they were first seen,
+        independent of where they land in the hash table -- so iterating
+        `order` gives reproducible first-seen-order traversal regardless
+        of hash bucket placement, which matters for deterministic merge
+        tie-breaking during BPE training.
 
     Fields (all public; train() walks them directly when building the
     per-word arena):
 
-        slots     open-addressing hash: slot -> entry index + 1 (0 = empty)
-        offsets   entry -> byte offset of the word inside `bytes`
-        lengths   entry -> word byte length
-        counts    entry -> frequency
-        order     entry indices in first-seen order
-        bytes     flat arena holding every unique word's bytes exactly once
+        slots      Open-addressing hash table. slots[i] == 0 means slot i
+                   is empty. slots[i] == e + 1 means slot i holds entry e
+                   (stored as e+1, not e, specifically so 0 can mean
+                   "empty" without colliding with the valid entry index 0).
+                   Always sized as a power of two so that
+                   `hash & (slot_cap - 1)` can be used instead of `%`
+                   (bitmask is cheaper than modulo, and only valid because
+                   slot_cap is a power of two everywhere it's used).
+
+        offsets    entry -> starting byte offset of that word's bytes
+                   inside the `bytes` arena.
+
+        lengths    entry -> byte length of that word.
+
+        counts     entry -> how many times that word has been seen so far
+                   (this IS the frequency table -- everything else exists
+                   to compute and index into this array correctly).
+
+        order      order[0], order[1], ... are entry numbers in the
+                   sequence they were first inserted. Since entries are
+                   already assigned in first-seen order (entry 0 is the
+                   first unique word ever seen, entry 1 the second, etc.),
+                   `order` is currently always just [0, 1, 2, ..., n-1] --
+                   but it's kept as an explicit array (rather than relying
+                   on that implicit fact) so iteration order stays a
+                   documented guarantee even if entry assignment ever
+                   changes, and so callers can iterate `order` without
+                   needing to know entries happen to already be sequential.
+
+        bytes      A single flat byte buffer holding every unique word's
+                   raw bytes, back to back, each exactly once. Individual
+                   words are never stored more than once even though
+                   add() may be called on the same word thousands of
+                   times -- only counts[e] increments on repeat sightings.
+
+        n_entries  Total number of unique words seen so far. Also the
+                   next entry number that will be assigned.
+
+        slot_cap   Current size of the `slots` array (always a power of
+                   two). Grows via _rehash() as n_entries approaches it.
+
+    Typical usage (from train()):
+        var wc = WordCounts()
+        for each word span found while splitting the corpus:
+            wc.add(word_ptr, word_len)
+        # afterwards, for e in wc.order: wc.counts[e] is that word's
+        # frequency, and wc.bytes[wc.offsets[e]:...+wc.lengths[e]] is
+        # its raw bytes.
     """
+
+    comptime FNV_offset_basis = UInt64(0xCBF29CE484222325)
+    """Starting hash value for FNV-1a (a fixed constant defined by the
+    FNV-1a algorithm itself -- not arbitrary, must match the spec exactly
+    for the hash to behave correctly)."""
+
+    comptime FNV_prime = UInt64(0x100000001B3)
+    """Multiplier constant for FNV-1a (also fixed by the algorithm's
+    definition -- chosen for good bit-mixing properties, not a value
+    that can be changed without changing the hash function's behavior)."""
 
     var slots: IntArray
     var offsets: IntArray
@@ -1115,13 +1170,29 @@ struct WordCounts:
     var slot_cap: Int
 
     def __init__(out self, capacity: Int = 4096):
+        """Create an empty table sized for roughly `capacity` unique words.
+
+        `capacity` is a hint, not a hard limit -- the table grows
+        automatically via _rehash() if more unique words arrive than
+        expected; this just avoids early reallocation for the common case.
+
+        The hash table itself (`slots`) is sized to 4x `capacity`, rounded
+        up to the next power of two, so that it starts at a 25% load
+        factor (25% of slots occupied once `capacity` entries are added).
+        Starting this sparse keeps collision rates low and probe chains
+        short even before any rehash has occurred.
+
+        Example: capacity=4096 -> cap starts at 16, doubles until it's
+        >= 16384 (4096*4) -> slot_cap ends up 16384.
+
+        Args:
+            capacity: Expected number of unique words. Default 4096.
+        """
         var cap = 16
         while cap < capacity * 4:
             cap *= 2
         self.slot_cap = cap
-        self.slots = IntArray(capacity=cap)
-        for _ in range(cap):
-            self.slots.append(0)
+        self.slots = IntArray(length=cap, fill=0)  # 0 = every slot empty
         self.offsets = IntArray(capacity=capacity)
         self.lengths = IntArray(capacity=capacity)
         self.counts = IntArray(capacity=capacity)
@@ -1129,37 +1200,125 @@ struct WordCounts:
         self.bytes = ByteArray()
         self.n_entries = 0
 
+    def __init__(out self, *, copy: Self):
+        """Deep-copy constructor -- every backing array is independently
+        duplicated (via each array's own .copy()), so mutating the copy
+        never affects the original and vice versa."""
+        self.slot_cap = copy.slot_cap
+        self.slots = copy.slots.copy()
+        self.offsets = copy.offsets.copy()
+        self.lengths = copy.lengths.copy()
+        self.counts = copy.counts.copy()
+        self.order = copy.order.copy()
+        self.bytes = copy.bytes.copy()
+        self.n_entries = copy.n_entries
+
+    def __init__(out self, *, deinit move: Self):
+        """Move constructor -- takes ownership of `move`'s backing arrays
+        directly (the `^` transfer sigil) rather than copying their
+        contents, so this is O(1) regardless of table size. `move` is
+        consumed and can't be used afterward."""
+        self.slot_cap = move.slot_cap
+        self.slots = move.slots^
+        self.offsets = move.offsets^
+        self.lengths = move.lengths^
+        self.counts = move.counts^
+        self.order = move.order^
+        self.bytes = move.bytes^
+        self.n_entries = move.n_entries
+
     def _rehash(mut self, new_cap: Int):
+        """Grow the hash table to `new_cap` slots and reinsert every
+        existing entry into it.
+
+        Only the `slots` array is rebuilt here -- offsets/lengths/counts/
+        order/bytes are untouched, since entry numbers and their data
+        never change across a rehash, only *where in `slots` each entry's
+        pointer lives* changes (because the bucket index depends on
+        `hash & (slot_cap - 1)`, which shifts once slot_cap changes).
+
+        Called automatically by add() once the table gets too full (see
+        add()'s load-factor check) -- not intended to be called directly.
+
+        Args:
+            new_cap: The new slot array size. Must be a power of two,
+                since bucket indices are computed with a bitmask
+                (`& (new_cap - 1)`) rather than modulo.
+        """
         self.slots = IntArray(length=new_cap, fill=0)
         self.slot_cap = new_cap
         var nsp = self.slots.unsafe_ptr()
         var bp = self.bytes.unsafe_ptr()
+        # Re-walk every existing entry (in entry-number order) and
+        # reinsert it into the freshly-sized, freshly-zeroed slots array.
         for e in range(self.n_entries):
-            var h = _fnv1a64(bp + self.offsets[e], self.lengths[e])
+            var h = Self._fnv1a64(bp + self.offsets[e], self.lengths[e])
             var idx = Int(h & UInt64(new_cap - 1))
+            # Linear probe forward until an empty slot is found -- same
+            # probing rule used in add(), so lookups after a rehash land
+            # in exactly the same relative positions they would if the
+            # table had always been this size.
             while nsp[idx] != 0:
                 idx = (idx + 1) & (new_cap - 1)
-            nsp[idx] = e + 1
-        # `old` is dropped at end of scope (frees its allocation)
+            nsp[idx] = e + 1  # store as e+1; see `slots` field doc for why
 
     def add[
         origin: Origin, //
     ](mut self, ptr: UnsafePointer[UInt8, origin], length: Int):
+        """Record one occurrence of the word at ptr[0:length].
+
+        If this exact byte sequence has been seen before, its existing
+        entry's count is incremented by 1 (O(1) average case, no
+        allocation). If it's new, a new entry is created: its bytes are
+        copied once into the `bytes` arena, and offsets/lengths/counts/
+        order/slots are all updated to track it.
+
+        Zero-length words are silently ignored (a no-op) rather than
+        treated as a valid empty-string entry.
+
+        Growth: before inserting, checks whether the table has crossed a
+        50% load factor (n_entries*2 >= slot_cap) and doubles the slot
+        array via _rehash() if so -- this keeps average probe-chain
+        length short as the table fills, at the cost of an O(n) rehash
+        pass on the (amortized rare) occasions it triggers.
+
+        Lookup: hashes the incoming bytes with FNV-1a, then walks the
+        slots array starting at `hash & (slot_cap - 1)`, following the
+        linear-probe chain (checking the next slot whenever the current
+        one is occupied) until either:
+          (a) an occupied slot's entry has matching length AND matching
+              bytes (verified with memcmp, since hash equality alone
+              doesn't guarantee the bytes are actually the same word --
+              this is genuine collision handling, not just an
+              optimization), in which case that entry's count is bumped
+              and the function returns, or
+          (b) an empty slot (value 0) is reached, meaning this word has
+              never been seen -- a new entry is created here.
+
+        Args:
+            ptr: Pointer to the first byte of the word.
+            length: Number of bytes in the word. 0 is a no-op.
+        """
         if length == 0:
             return
         if self.n_entries * 2 >= self.slot_cap:
             self._rehash(self.slot_cap * 2)
-        var h = _fnv1a64(ptr, length)
+        var h = Self._fnv1a64(ptr, length)
         var sp = self.slots.unsafe_ptr()
         var idx = Int(h & UInt64(self.slot_cap - 1))
         while sp[idx] != 0:
-            var e = sp[idx] - 1
-            if self.lengths[e] == length and _bytes_eq(
+            var e = sp[idx] - 1  # stored entries are offset by +1; undo it
+            if self.lengths[e] == length and memcmp(
                 self.bytes.unsafe_ptr() + self.offsets[e], ptr, length
-            ):
+            ) == 0:
+                # Found: same length and byte-identical -> same word.
                 self.counts[e] += 1
                 return
+            # Occupied by a different word (hash collision) -> probe next.
             idx = (idx + 1) & (self.slot_cap - 1)
+        # Reached an empty slot without finding a match -> genuinely new
+        # word. Create entry `e`, copy its bytes into the arena once,
+        # and register it in every parallel array plus the hash table.
         var e = self.n_entries
         var boff = len(self.bytes)
         self.bytes.reserve(boff + length)
@@ -1173,12 +1332,50 @@ struct WordCounts:
         self.n_entries += 1
 
     def add[origin: Origin, //](mut self, span: Span[UInt8, origin]):
+        """Convenience overload: record one occurrence of the word held
+        in `span`. Equivalent to add(span.unsafe_ptr(), len(span))."""
         self.add(span.unsafe_ptr(), len(span))
 
     def add[
         origin: Origin, //
     ](mut self, start: UnsafePointer[UInt8, origin], pos: Int, length: Int):
+        """Convenience overload: record one occurrence of the word found
+        at byte offset `pos` within the buffer starting at `start`.
+        Equivalent to add(start + pos, length) -- useful when the caller
+        is walking offsets into one larger buffer rather than holding a
+        separate pointer per word."""
         self.add(start + pos, length)
+
+    @staticmethod
+    @always_inline
+    def _fnv1a64[
+        origin: Origin, //
+    ](ptr: UnsafePointer[UInt8, origin], n: Int) -> UInt64:
+        """Compute the 64-bit FNV-1a hash of n bytes starting at ptr.
+
+        FNV-1a processes one byte at a time: XOR the byte into the
+        running hash, then multiply by the FNV prime. This ordering
+        (XOR-then-multiply, as opposed to FNV-1's multiply-then-XOR) is
+        what gives FNV-1a its slightly better bit-avalanche behavior for
+        short keys like individual words -- appropriate here since most
+        words are just a handful of bytes.
+
+        Not cryptographically secure and not intended to be -- this is a
+        fast, well-distributed hash for hash-table bucketing, not for any
+        security-sensitive use.
+
+        Args:
+            ptr: Pointer to the first byte to hash.
+            n: Number of bytes to hash.
+
+        Returns:
+            The 64-bit FNV-1a hash of ptr[0:n].
+        """
+        var h: UInt64 = Self.FNV_offset_basis
+        for i in range(n):
+            h ^= UInt64(ptr[i])
+            h *= Self.FNV_prime
+        return h
 
 
 trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
@@ -1300,7 +1497,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         and GPT4Pretokenizer override with an inlined matcher loop, and
         GPreTokenizer overrides via its transforming split.
         """
-        var views = self.split_view(text)
+        ref views = self.split_view(text)
         for v in views:
             counts.add(v.as_bytes())
 
