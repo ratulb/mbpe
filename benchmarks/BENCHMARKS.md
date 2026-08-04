@@ -14,7 +14,7 @@ Three BPE operations across four implementations:
 
 | Label | Language | What |
 |-------|----------|------|
-| `mojo` | Mojo | Our `BPETokenizer` — 3 pre-tokeniser variants (gpre, gpt2, gpt4) × 4 vocab sizes (500, 1000, 2000, 4000) |
+| `mojo` | Mojo | Our `BPETokenizer` — 2 pre-tokeniser variants (gpt2, gpt4) × 4 vocab sizes (500, 1000, 2000, 4000) |
 | `tiktoken_py` | Python | OpenAI's `tiktoken` library — `gpt2` + `cl100k_base` encodings |
 | `mbpe_py` | Python | Our Mojo library exposed via Python bindings — `gpt2`, `cl100k`, `o200k` encodings (pre-loaded from `.tiktoken` files) |
 | `tiktoken_rs` | Rust | `tiktoken-rs` crate — `p50k_base` (GPT-2) + `cl100k_base` (GPT-4) |
@@ -45,7 +45,7 @@ Every benchmark script writes **JSON lines** to stdout, one object per (implemen
 ```json
 {
   "impl": "mojo",
-  "variant": "gpre|gpt2|gpt4",
+  "variant": "gpt2|gpt4",
   "corpus_bytes": 1048576,
   "vocab_size": 500,
   "n_vocab": 498,
@@ -81,7 +81,7 @@ Every benchmark script writes **JSON lines** to stdout, one object per (implemen
 ```json
 {
   "impl": "mbpe_py",
-  "encoding": "gpre|gpt2|gpt4|gpt4o",
+  "encoding": "gpt2|gpt4|gpt4o",
   "corpus_bytes": 19800,
   "n_tokens": 9500,
   "train_ms": 1.0,
@@ -162,7 +162,7 @@ mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbp
 PYTHONPATH=python-binding python benchmarks/smoke_bench.py
 ```
 
-Trains all 4 variants on inline corpus (~10 KB), measures encode/decode. No Rust, no tiktoken, no external files needed.
+Trains all 3 variants on inline corpus (~10 KB), measures encode/decode. No Rust, no tiktoken, no external files needed.
 
 ### Quick benchmark (~30 seconds, 1 MB corpus, all 4 implementations)
 
@@ -233,7 +233,7 @@ python benchmarks/build_summary.py
 | File | Role |
 |------|------|
 | `bm.mojo` | Entry point — calls `run_all()` from `benchmark.mojo`. |
-| `benchmark.mojo` | Core logic: `run_all()` (3 variants × 4 sizes) and `run[PT]()` (single variant). Best-of-20 timing. |
+| `benchmark.mojo` | Core logic: `run_all()` (2 variants × 4 sizes) and `run[PT]()` (single variant). Best-of-20 timing. |
 | `benchmark_simple.mojo` | Self-contained benchmark with inline corpus. No file dependencies. |
 | `profile_decode.mojo` | Micro-benchmark profiling decode pass-by-pass. |
 | `benchmark_approaches.mojo` | Compares 3 BPE encoding strategies (baseline, RankTable, PairCache). |
@@ -245,7 +245,7 @@ python benchmarks/build_summary.py
 | `benchmark_tiktoken.py` | `tiktoken` library — `gpt2` + `cl100k_base`, 20 iterations. |
 | `benchmark_mbpe.py` | mbpe Python bindings — `gpt2` / `cl100k` / `o200k`, 20 iterations. |
 | `benchmark_mbpe_quick.py` | Same as `benchmark_mbpe.py` but 3 iterations, defaults to `corpus_1MB.txt`. |
-| `smoke_bench.py` | Ultra-light (~2 s): inline corpus, all 4 variants, 5 iterations. No external deps. |
+| `smoke_bench.py` | Ultra-light (~2 s): inline corpus, all 3 variants, 5 iterations. No external deps. |
 
 ### Rust benchmark
 
@@ -281,7 +281,7 @@ python benchmarks/build_summary.py
 
 | Path | Contents |
 |------|----------|
-| `results/mojo_{LABEL}.json` | Mojo raw output (12 lines: 3 variants × 4 vocab sizes) |
+| `results/mojo_{LABEL}.json` | Mojo raw output (8 lines: 2 variants × 4 vocab sizes) |
 | `results/py_{LABEL}.json` | Python tiktoken raw output (2 lines: gpt2, cl100k) |
 | `results/mbpe_{LABEL}.json` | mbpe Python bindings raw output (3 lines: gpt2, cl100k, o200k) |
 | `results/rs_{LABEL}.json` | Rust tiktoken-rs raw output (2 lines: gpt2, cl100k) |

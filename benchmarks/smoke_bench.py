@@ -29,7 +29,6 @@ def main():
     results = []
 
     for name, cls in [
-        ("gpre", mbpe.GPreTokenizer),
         ("gpt2", mbpe.GPT2Tokenizer),
         ("gpt4", mbpe.GPT4Tokenizer),
         ("gpt4o", mbpe.GPT4oTokenizer),

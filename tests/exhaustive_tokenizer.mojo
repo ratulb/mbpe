@@ -20,15 +20,17 @@ from std.testing import assert_equal, assert_true, TestSuite
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_vocab_unique_ids() raises:
-    """Verify no two vocab entries have identical display strings."""
+    """Verify no two vocab entries have identical raw bytes (bytes are a
+    bijection now that GPre's collapse is gone)."""
     var corpus = List[String]()
     corpus.append(String("The quick brown fox jumps over the lazy dog."))
     corpus.append(String("A completely different sentence about tokenizers."))
     var tok = BPETokenizer()
     tok.train(corpus, 300)
-    for i in range(len(tok.vocab)):
-        for j in range(i + 1, len(tok.vocab)):
-            assert_true(tok.vocab[i] != tok.vocab[j])
+    var values = tok.token_byte_values()
+    for i in range(len(values)):
+        for j in range(i + 1, len(values)):
+            assert_true(values[i] != values[j])
 
 
 def test_vocab_size_matches_expected() raises:

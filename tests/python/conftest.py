@@ -8,7 +8,6 @@ import mbpe
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
 TOKENIZER_CLASSES = {
-    "gpre": mbpe.GPreTokenizer,
     "gpt2": mbpe.GPT2Tokenizer,
     "gpt4": mbpe.GPT4Tokenizer,
     "gpt4o": mbpe.GPT4oTokenizer,
@@ -23,8 +22,7 @@ CORPUS = [
 
 CANONICAL_CORPUS = ["aaabdaaabac"]
 
-ALL_VARIANTS = ["gpre", "gpt2", "gpt4", "gpt4o"]
-GPRE_VARIANTS = ["gpre"]
+ALL_VARIANTS = ["gpt2", "gpt4", "gpt4o"]
 
 
 @pytest.fixture(params=ALL_VARIANTS)

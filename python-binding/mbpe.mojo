@@ -1,14 +1,13 @@
-"""Python bindings for mbpe — all 4 BPETokenizer variants.
+"""Python bindings for mbpe — all 3 BPETokenizer variants.
 
 Build: mojo build python-binding/mbpe.mojo -I . --emit shared-lib -o python-binding/mbpe/_mbpe.so
-Use:   PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPreTokenizer()"
+Use:   PYTHONPATH=python-binding python -c "import mbpe; tok = mbpe.GPT2Tokenizer()"
 """
 
 from std.python import Python, PythonObject
 from std.python.bindings import PythonModuleBuilder
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import (
-    GPreTokenizer,
     GPT2Pretokenizer,
     GPT4Pretokenizer,
     ByteMapping,
@@ -17,7 +16,6 @@ from bpe.pretokenizer import (
 
 # ── Type aliases ─────────────────────────────────────────────────
 
-comptime GPreTK = BPETokenizer[GPreTokenizer]
 comptime GPT2TK = BPETokenizer[GPT2Pretokenizer]
 comptime GPT4TK = BPETokenizer[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]
 comptime GPT4oTK = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]
@@ -67,11 +65,8 @@ def _py_ids_to_mojo(py_ids: PythonObject) raises -> List[Int]:
 
 
 # ── Parameterized binding helpers (instantiated per-type) ──────
-# Each method is duplicated for all 4 types to work around Mojo's
+# Each method is duplicated for all 3 types to work around Mojo's
 # trait constraint limitation on downcast_value_ptr.
-
-def _name_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    _ = args; return PythonObject(self.downcast_value_ptr[GPreTK]()[].name())
 
 def _name_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args; return PythonObject(self.downcast_value_ptr[GPT2TK]()[].name())
@@ -81,10 +76,6 @@ def _name_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonO
 
 def _name_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args; return PythonObject(self.downcast_value_ptr[GPT4oTK]()[].name())
-
-def _decode_bytes_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    return _uint8_list_to_py_bytes(ptr[].decode_bytes(Span[Int](_py_ids_to_mojo(args[0]))))
 
 def _decode_bytes_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
@@ -98,10 +89,6 @@ def _decode_bytes_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -
     var ptr = self.downcast_value_ptr[GPT4oTK]()
     return _uint8_list_to_py_bytes(ptr[].decode_bytes(Span[Int](_py_ids_to_mojo(args[0]))))
 
-def _encode_single_token_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
-
 def _encode_single_token_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
     return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
@@ -113,10 +100,6 @@ def _encode_single_token_gpt4(mut self: PythonObject, mut args: PythonObject) ra
 def _encode_single_token_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
     return PythonObject(ptr[].encode_single_token(Python().as_string_slice(args[0])))
-
-def _token_byte_values_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    _ = args
-    return _uint8_list_list_to_py_list(self.downcast_value_ptr[GPreTK]()[].token_byte_values())
 
 def _token_byte_values_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     _ = args
@@ -130,10 +113,6 @@ def _token_byte_values_gpt4o(mut self: PythonObject, mut args: PythonObject) rai
     _ = args
     return _uint8_list_list_to_py_list(self.downcast_value_ptr[GPT4oTK]()[].token_byte_values())
 
-def _decode_single_token_bytes_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    return _uint8_list_to_py_bytes(ptr[].decode_single_token_bytes(Int(py=args[0])))
-
 def _decode_single_token_bytes_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
     return _uint8_list_to_py_bytes(ptr[].decode_single_token_bytes(Int(py=args[0])))
@@ -145,22 +124,6 @@ def _decode_single_token_bytes_gpt4(mut self: PythonObject, mut args: PythonObje
 def _decode_single_token_bytes_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
     return _uint8_list_to_py_bytes(ptr[].decode_single_token_bytes(Int(py=args[0])))
-
-def _decode_with_offsets_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var ids = _py_ids_to_mojo(args[0])
-    var starts = List[Int]()
-    var ends = List[Int]()
-    var text = ptr[].decode_with_offsets(Span[Int](ids), starts, ends)
-    var _b = Python.import_module("builtins")
-    ref cpy = Python().cpython()
-    var py_vals = List[PythonObject](capacity=len(starts))
-    for i in range(len(starts)):
-        var tup = cpy.PyTuple_New(2)
-        _ = cpy.PyTuple_SetItem(tup, 0, cpy.PyLong_FromSsize_t(starts[i]))
-        _ = cpy.PyTuple_SetItem(tup, 1, cpy.PyLong_FromSsize_t(ends[i]))
-        py_vals.append(PythonObject(from_owned=tup))
-    return _b.eval("lambda t, o: (t, o)")(PythonObject(text), Python.list(Span[PythonObject](py_vals)))
 
 def _decode_with_offsets_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
@@ -209,79 +172,6 @@ def _decode_with_offsets_gpt4o(mut self: PythonObject, mut args: PythonObject) r
         _ = cpy.PyTuple_SetItem(tup, 1, cpy.PyLong_FromSsize_t(ends[i]))
         py_vals.append(PythonObject(from_owned=tup))
     return _b.eval("lambda t, o: (t, o)")(PythonObject(text), Python.list(Span[PythonObject](py_vals)))
-
-
-# ═════════════════════════════════════════════════════════════════
-# GPreTokenizer
-# ═════════════════════════════════════════════════════════════════
-
-def _init_gpre(args: PythonObject, kwargs: PythonObject) raises -> GPreTK:
-    return GPreTK()
-
-def _train_gpre(mut self: PythonObject, mut args: PythonObject, mut kwargs: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var corpus_py = args[0]
-    var vocab_size = Int(py=args[1]) if len(args) >= 2 else Int(py=kwargs["vocab_size"])
-    var corpus = List[String]()
-    var n = len(corpus_py)
-    for i in range(n):
-        corpus.append(String(corpus_py[i]))
-    ptr[].train(Span[String](corpus), vocab_size)
-    return PythonObject(None)
-
-def _encode_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var ids = ptr[].encode(Python().as_string_slice(args[0]))
-    return _list_of_int_to_py(ids)
-
-def _encode_ordinary_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var ids = ptr[].encode_ordinary(Python().as_string_slice(args[0]))
-    return _list_of_int_to_py(ids)
-
-def _decode_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var py_ids = args[0]
-    var n = len(py_ids)
-    ref cpy = Python().cpython()
-    var list_ptr = py_ids.steal_data()
-    var ids = List[Int](capacity=n)
-    for i in range(n):
-        ids.append(Int(cpy.PyLong_AsSsize_t(cpy.PyList_GetItem(list_ptr, i))))
-    return PythonObject(ptr[].decode(Span[Int](ids)))
-
-def _n_vocab_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    _ = args; return PythonObject(len(self.downcast_value_ptr[GPreTK]()[]))
-
-def _save_tiktok_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    self.downcast_value_ptr[GPreTK]()[].save_tiktoken(String(args[0]))
-    return PythonObject(None)
-
-def _load_tiktok_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    self.downcast_value_ptr[GPreTK]()[].load_tiktoken(String(args[0]))
-    return PythonObject(None)
-
-def _reg_special_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var tokens = _py_dict_to_mojo(args[0])
-    ptr[].register_special_tokens(tokens^)
-    return PythonObject(None)
-
-def _get_specials_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    _ = args
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var result = Python.evaluate("{}")
-    for item in ptr[].special_bytes.items():
-        result[PythonObject(item.key)] = Python.int(item.value)
-    return result
-
-def _set_specials_gpre(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
-    var ptr = self.downcast_value_ptr[GPreTK]()
-    var tokens = _py_dict_to_mojo(args[0])
-    ptr[].special_bytes = Dict[String, Int]()
-    ptr[].inverse_special = Dict[Int, String]()
-    ptr[].register_special_tokens(tokens^)
-    return PythonObject(None)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -542,11 +432,7 @@ def py_train(
     for i in range(len(texts)):
         corpus.append(String(texts[i]))
 
-    if pt_name == "gpre":
-        var tok = GPreTK()
-        tok.train(Span[String](corpus), vocab_sz)
-        return PythonObject(alloc=tok^)
-    elif pt_name == "gpt2":
+    if pt_name == "gpt2":
         var tok = GPT2TK()
         tok.train(Span[String](corpus), vocab_sz)
         return PythonObject(alloc=tok^)
@@ -555,11 +441,7 @@ def py_train(
         tok.train(Span[String](corpus), vocab_sz)
         return PythonObject(alloc=tok^)
     else:
-        raise Error("unknown pretokenizer: '" + pt_name + "'; use 'gpre', 'gpt2', or 'gpt4'")
-
-
-def py_train_gpre(texts: PythonObject, vocab_size: PythonObject) raises -> PythonObject:
-    return py_train(texts, vocab_size, PythonObject(String("gpre")))
+        raise Error("unknown pretokenizer: '" + pt_name + "'; use 'gpt2' or 'gpt4'")
 
 
 # ── Module entry point ───────────────────────────────────────────
@@ -568,25 +450,6 @@ def py_train_gpre(texts: PythonObject, vocab_size: PythonObject) raises -> Pytho
 def PyInit_mbpe() abi("C") -> PythonObject:
     try:
         var mb = PythonModuleBuilder("mbpe")
-
-        _ = mb.add_type[GPreTK]("GPreTokenizer") \
-            .def_py_init[_init_gpre]() \
-            .def_py_method[_train_gpre]("train") \
-            .def_py_method[_encode_gpre]("encode") \
-            .def_py_method[_encode_ordinary_gpre]("encode_ordinary") \
-            .def_py_method[_decode_gpre]("decode") \
-            .def_py_method[_n_vocab_gpre]("n_vocab") \
-            .def_py_method[_save_tiktok_gpre]("save_tiktoken") \
-            .def_py_method[_load_tiktok_gpre]("load_tiktoken") \
-            .def_py_method[_reg_special_gpre]("register_special_tokens") \
-            .def_py_method[_get_specials_gpre]("_get_special_bytes") \
-            .def_py_method[_set_specials_gpre]("_set_special_bytes") \
-            .def_py_method[_name_gpre]("name") \
-            .def_py_method[_decode_bytes_gpre]("decode_bytes") \
-            .def_py_method[_encode_single_token_gpre]("encode_single_token") \
-            .def_py_method[_token_byte_values_gpre]("token_byte_values") \
-            .def_py_method[_decode_single_token_bytes_gpre]("decode_single_token_bytes") \
-            .def_py_method[_decode_with_offsets_gpre]("decode_with_offsets")
 
         _ = mb.add_type[GPT2TK]("GPT2Tokenizer") \
             .def_py_init[_init_gpt2]() \
@@ -647,7 +510,6 @@ def PyInit_mbpe() abi("C") -> PythonObject:
 
         mb.def_function[py_get_encoding]("get_encoding")
         mb.def_function[py_train]("_train_impl")
-        mb.def_function[py_train_gpre]("train")
 
         return mb.finalize()
     except:

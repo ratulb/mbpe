@@ -6,7 +6,6 @@ Usage:  mojo -I . benchmarks/bm.mojo
 
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import (
-    GPreTokenizer,
     GPT2Pretokenizer,
     GPT4Pretokenizer,
     PreTokenizer,
@@ -155,7 +154,6 @@ def run_all() raises:
 
     var vocab_sizes: List[Int] = [500, 1000, 2000, 4000]
 
-    run_one[GPreTokenizer]("GPre", corpus, full_text, n_bytes, vocab_sizes)
     run_one[GPT2Pretokenizer]("GPT2", corpus, full_text, n_bytes, vocab_sizes)
     run_one[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]("GPT4", corpus, full_text, n_bytes, vocab_sizes)
 

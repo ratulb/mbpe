@@ -1,8 +1,10 @@
 from bpe.tokenizer import BPETokenizer
-from bpe.pretokenizer import GPreTokenizer, GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
+from bpe.pretokenizer import GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
+from bpe.array import ByteArray
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, TestSuite
 from std.base64 import b64decode
+from std.memory import memcpy
 
 from std.python import Python
 
@@ -14,31 +16,22 @@ def check_splits[PT: PreTokenizer](pt: PT, text: String, expected: List[String])
         assert_equal(actual[i], expected[i])
 
 
+def bytes_of(text: String) -> ByteArray:
+    var result = ByteArray()
+    for b in text.as_bytes():
+        result.append(b)
+    return result^
+
+
+def concat_bytes(a: ByteArray, b: ByteArray) raises -> ByteArray:
+    var result = ByteArray(capacity=len(a) + len(b))
+    result.resize(len(a) + len(b), 0)
+    memcpy(dest=result.unsafe_ptr(), src=a.unsafe_ptr(), count=len(a))
+    memcpy(dest=result.unsafe_ptr() + len(a), src=b.unsafe_ptr(), count=len(b))
+    return result^
+
+
 # ── Level A: Pre-tokenizer split alignment ──────────────────────
-
-def test_gpre_splits() raises:
-    var text = String(
-        "Hello world! Don't stop I'll be there 123 U.S.A. new\nline  \n\n \n"
-    )
-    var expected = List[String]()
-    expected.append(String("Hello"))
-    expected.append(String("Ġworld!"))
-    expected.append(String("ĠDon't"))
-    expected.append(String("Ġstop"))
-    expected.append(String("ĠI'll"))
-    expected.append(String("Ġbe"))
-    expected.append(String("Ġthere"))
-    expected.append(String("Ġ123"))
-    expected.append(String("ĠU"))
-    expected.append(String(".S"))
-    expected.append(String(".A"))
-    expected.append(String("."))
-    expected.append(String("Ġnew\nline"))
-    expected.append(String("Ġ"))
-    expected.append(String("Ġ\n\n"))
-    expected.append(String("Ġ\n"))
-    check_splits(GPreTokenizer(), text, expected)
-
 
 def test_gpt2_splits() raises:
     var text = String(
@@ -100,7 +93,6 @@ def test_gpt4_splits() raises:
 def test_split_counts() raises:
     """Verify split counts match Python regex reference on full corpus."""
     var text = Path("benchmarks/corpus.txt").read_text()
-    assert_equal(len(GPreTokenizer().split(text)), 179425)
     assert_equal(len(GPT2Pretokenizer().split(text)), 265727)
     assert_equal(len(GPT4Pretokenizer[ByteMapping.SEQUENTIAL]().split(text)), 242095)
 
@@ -174,7 +166,10 @@ def test_full_hf_corpus() raises:
     tok.save_tiktoken("/tmp/bpe_hf_test.tiktoken")
     var loaded = BPETokenizer()
     loaded.load_tiktoken("/tmp/bpe_hf_test.tiktoken")
-    assert_equal(len(loaded), len(tok))
+    # GPT2 auto-registers <|endoftext|> (gap-padding the table), so total
+    # length grows; merge rules and encode behavior are what must match.
+    assert_equal(len(loaded.merges), len(tok.merges))
+    assert_true(50256 in loaded.inverse_special)
     assert_equal(
         loaded.decode(loaded.encode(String("This is not a token."))),
         "This is not a token.",
@@ -213,7 +208,6 @@ def test_tiktoken_roundtrip() raises:
     var loaded = BPETokenizer()
     loaded.load_tiktoken(path)
 
-    assert_equal(len(loaded), len(tok))
     assert_equal(len(loaded.merges), len(tok.merges))
     assert_equal(loaded.decode(loaded.encode(test_input)), test_input)
 
@@ -291,8 +285,8 @@ def test_tiktoken_deterministic_save() raises:
 # ═══════════════════════════════════════════════════════════════
 
 def test_tiktoken_merge_consistency() raises:
-    """Every recovered merge satisfies vocab[merged] == vocab[left] + vocab[right].
-       This validates that _recover_merges assigned the correct left/right IDs."""
+    """Every recovered merge satisfies
+       bytes[merged] == bytes[left] + bytes[right] (byte-level, exact)."""
     var corpus = List[String]()
     corpus.append(String("hello world"))
     var tok = BPETokenizer()
@@ -302,10 +296,11 @@ def test_tiktoken_merge_consistency() raises:
     loaded.load_tiktoken("/tmp/bpe_mc_test.tiktoken")
     assert_true(len(loaded.merges) > 0)
     for mr in loaded.merges:
-        var left = loaded.vocab[mr.first].copy()
-        var right = loaded.vocab[mr.second].copy()
-        var expected = left + right
-        assert_equal(loaded.vocab[mr.merged], expected)
+        var expected = concat_bytes(
+            loaded.decode_single_token_bytes(mr.first),
+            loaded.decode_single_token_bytes(mr.second),
+        )
+        assert_equal(loaded.decode_single_token_bytes(mr.merged), expected)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -348,7 +343,7 @@ def test_tiktoken_save_load_roundtrip() raises:
     var loaded = BPETokenizer()
     loaded.load_tiktoken("/tmp/bpe_tk_rt.tiktoken")
 
-    assert_equal(len(loaded), len(tok))
+    assert_equal(len(loaded.merges), len(tok.merges))
     var tk_ids = loaded.encode(test_input)
     assert_equal(loaded.decode(tk_ids), test_input)
 
@@ -356,27 +351,6 @@ def test_tiktoken_save_load_roundtrip() raises:
 # ═══════════════════════════════════════════════════════════════
 # Level E — Multi-pre-tokenizer roundtrip
 # ═══════════════════════════════════════════════════════════════
-
-def test_tiktoken_gpre_roundtrip() raises:
-    """Full .tiktoken roundtrip with GPreTokenizer (explicit)."""
-    var corpus = List[String]()
-    corpus.append(String("hello world"))
-    var tok = BPETokenizer[GPreTokenizer]()
-    tok.train(corpus, 300)
-    var test_input = String("hello world")
-    var original_ids = tok.encode(test_input)
-
-    tok.save_tiktoken("/tmp/bpe_gpre_rt.tiktoken")
-    var loaded = BPETokenizer[GPreTokenizer]()
-    loaded.load_tiktoken("/tmp/bpe_gpre_rt.tiktoken")
-
-    assert_equal(len(loaded.merges), len(tok.merges))
-    var loaded_ids = loaded.encode(test_input)
-    assert_equal(len(loaded_ids), len(original_ids))
-    for i in range(len(original_ids)):
-        assert_equal(loaded_ids[i], original_ids[i])
-    assert_equal(loaded.decode(loaded_ids), test_input)
-
 
 def test_tiktoken_gpt2_roundtrip() raises:
     """Full .tiktoken roundtrip with GPT2Pretokenizer."""
@@ -458,7 +432,6 @@ def test_tiktoken_unicode_text() raises:
     var loaded = BPETokenizer()
     loaded.load_tiktoken("/tmp/bpe_uni_test.tiktoken")
 
-    assert_equal(len(loaded), len(tok))
     assert_equal(len(loaded.merges), len(tok.merges))
     var loaded_ids = loaded.encode(test_input)
     assert_equal(len(loaded_ids), len(original_ids))
@@ -481,7 +454,6 @@ def test_tiktoken_no_merges() raises:
     var loaded = BPETokenizer()
     loaded.load_tiktoken("/tmp/bpe_nm_test.tiktoken")
 
-    assert_equal(len(loaded), 256)
     assert_equal(len(loaded.merges), 0)
     assert_equal(loaded.decode(loaded.encode(String("hello"))), "hello")
 
@@ -514,13 +486,15 @@ def test_load_o200k_base() raises:
     assert_equal(len(reloaded), len(tok))
     assert_equal(len(reloaded.merges), len(tok.merges))
 
-    # Verify that merge consistency holds: vocab[merged] == vocab[left] + vocab[right]
+    # Verify that merge consistency holds:
+    # bytes[merged] == bytes[left] + bytes[right] (byte-level, exact)
     var checked = 0
     for mr in reloaded.merges:
-        var left = reloaded.vocab[mr.first].copy()
-        var right = reloaded.vocab[mr.second].copy()
-        var expected = left + right
-        assert_equal(reloaded.vocab[mr.merged], expected)
+        var expected = concat_bytes(
+            reloaded.decode_single_token_bytes(mr.first),
+            reloaded.decode_single_token_bytes(mr.second),
+        )
+        assert_equal(reloaded.decode_single_token_bytes(mr.merged), expected)
         checked += 1
         if checked >= 1000:
             break
@@ -563,7 +537,6 @@ def test_tiktoken_load_parity() raises:
     var loaded = BPETokenizer()
     loaded.load_tiktoken(path)
 
-    assert_equal(len(loaded), len(tok))
     assert_equal(len(loaded.merges), len(tok.merges))
 
     var loaded_ids = loaded.encode(test_input)
@@ -645,9 +618,6 @@ def test_byte_mapping_roundtrip() raises:
 
 def test_special_tokens_pt_mappings() raises:
     """Each PT returns the correct special token mapping."""
-    var gpre = GPreTokenizer.special_tokens()
-    assert_equal(len(gpre), 0)
-
     var gpt2 = GPT2Pretokenizer.special_tokens()
     assert_equal(gpt2["<|endoftext|>"], 50256)
 
@@ -676,12 +646,12 @@ def test_special_tokens_register() raises:
     assert_true(50256 in tok.inverse_special)
     assert_equal(tok.inverse_special[50256], "<|endoftext|>")
     assert_true(len(tok) >= 50257)
-    assert_equal(tok.vocab[50256], "<|endoftext|>")
+    assert_equal(tok.decode_single_token_bytes(50256), bytes_of("<|endoftext|>"))
 
 
 def test_special_tokens_encode_with_special() raises:
     """Encode text containing a special token."""
-    var tok = BPETokenizer[GPreTokenizer]()
+    var tok = BPETokenizer[GPT2Pretokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
     corpus.append(String("Another sentence for training"))
@@ -702,7 +672,7 @@ def test_special_tokens_encode_with_special() raises:
 
 def test_special_tokens_encode_without_special() raises:
     """Encode without special token — same as encode_ordinary."""
-    var tok = BPETokenizer[GPreTokenizer]()
+    var tok = BPETokenizer[GPT2Pretokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
     tok.train(corpus, 300)
@@ -717,7 +687,7 @@ def test_special_tokens_encode_without_special() raises:
 
 def test_special_tokens_no_specials_registered() raises:
     """No specials registered — encode_ordinary is the zero-cost path."""
-    var tok = BPETokenizer[GPreTokenizer]()
+    var tok = BPETokenizer[GPT2Pretokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
     tok.train(corpus, 300)
@@ -728,13 +698,13 @@ def test_special_tokens_no_specials_registered() raises:
 
 def test_special_tokens_save_load() raises:
     """Special tokens survive tiktoken save/load when re-registered after load."""
-    var tok = BPETokenizer[GPreTokenizer]()
+    var tok = BPETokenizer[GPT2Pretokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
     tok.train(corpus, 300)
 
     var specials = Dict[String, Int]()
-    specials["<|endoftext|>"] = 300
+    specials["<|startoftext|>"] = 300
     tok.register_special_tokens(specials)
 
     var path = "/tmp/bpe_special_save_load.tiktoken"
@@ -742,15 +712,16 @@ def test_special_tokens_save_load() raises:
     var loaded = BPETokenizer()
     loaded.load_tiktoken(path)
 
-    # tiktoken format does not persist special tokens; re-register after load
-    assert_equal(len(loaded.special_bytes), 0)
+    # tiktoken format does not persist special tokens; GPT2 auto-registers
+    # <|endoftext|>, so our custom special must be re-registered after load
+    assert_equal(len(loaded.special_bytes), 1)
     loaded.register_special_tokens(specials)
-    assert_equal(loaded.special_bytes["<|endoftext|>"], 300)
+    assert_equal(loaded.special_bytes["<|startoftext|>"], 300)
 
 
 def test_special_tokens_tiktoken_skip() raises:
-    """S(s)ave_tiktoken skips special tokens."""
-    var tok = BPETokenizer[GPreTokenizer]()
+    """save_tiktoken skips special tokens."""
+    var tok = BPETokenizer[GPT2Pretokenizer]()
     var corpus = List[String]()
     corpus.append(String("Hello world this is a test"))
     tok.train(corpus, 300)
@@ -762,11 +733,12 @@ def test_special_tokens_tiktoken_skip() raises:
     var path = "/tmp/bpe_special_skip.tiktoken"
     tok.save_tiktoken(path)
 
-    # Load back and check specials are re-registered
-    var loaded = BPETokenizer[GPreTokenizer]()
+    # Load back; the manually-registered mapping is not in the file.
+    # GPT2 auto-registers <|endoftext|> at its canonical id 50256.
+    var loaded = BPETokenizer[GPT2Pretokenizer]()
     loaded.load_tiktoken(path)
-    # GPreTokenizer has no special tokens, so none should be registered
-    assert_equal(len(loaded.special_bytes), 0)
+    assert_equal(len(loaded.special_bytes), 1)
+    assert_equal(loaded.special_bytes["<|endoftext|>"], 50256)
 
 
 def test_special_tokens_gpt2_auto_register() raises:
@@ -782,7 +754,7 @@ def test_special_tokens_gpt2_auto_register() raises:
     loaded.load_tiktoken(path)
     assert_equal(len(loaded.special_bytes), 1)
     assert_equal(loaded.special_bytes["<|endoftext|>"], 50256)
-    assert_equal(loaded.vocab[50256], "<|endoftext|>")
+    assert_equal(loaded.decode_single_token_bytes(50256), bytes_of("<|endoftext|>"))
 
 
 def main() raises:

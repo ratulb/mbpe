@@ -26,6 +26,8 @@ print(tokenizer.decode(tokens))        # "hello world"
 - **Extensible by design** — `PreTokenizer` is a Mojo trait, not a hardcoded implementation. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
 - **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
+> **Note:** the legacy `GPreTokenizer` (Ġ space convention) was removed. The default pre-tokenizer is now the GPT-2 `GPT2Pretokenizer`; `mbpe.GPreTokenizer` and the `"gpre"` encoding no longer exist.
+
 ---
 
 ## Installation
@@ -70,7 +72,7 @@ print(tokenizer.n_vocab)                          # 200019
 ### Train from scratch
 
 ```python
-tokenizer = mbpe.GPreTokenizer()
+tokenizer = mbpe.GPT2Tokenizer()
 corpus = ["the cat sat on the mat", "the dog sat on the log"]
 tokenizer.train(corpus, vocab_size=300)
 print(tokenizer.encode("the cat sat"))            # [259, 270, 265]
@@ -167,36 +169,36 @@ tok.train((["hello world"]), 300)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **13.8** | **175.3** |
-| mbpe — Python bindings | 1.54M | 10.9 | 84.3 |
-| tiktoken (Python) | 1.54M | 4.8 | 37.1 |
-| tiktoken-rs | 1.53M | 4.3 | 69.2 |
+| **mbpe — Mojo native** | 1.54M | **13.3** | **169.9** |
+| mbpe — Python bindings | 1.54M | 11.6 | 92.2 |
+| tiktoken (Python) | 1.54M | 4.8 | 40.4 |
+| tiktoken-rs | 1.53M | 4.3 | 65.6 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **11.6** | **163.9** |
-| mbpe — Python bindings | 1.28M | 9.0 | 84.1 |
-| tiktoken (Python) | 1.28M | 4.0 | 30.7 |
-| tiktoken-rs | 1.28M | 4.1 | 67.9 |
+| **mbpe — Mojo native** | 1.28M | **11.0** | **176.0** |
+| mbpe — Python bindings | 1.28M | 9.2 | 81.4 |
+| tiktoken (Python) | 1.28M | 4.4 | 38.3 |
+| tiktoken-rs | 1.28M | 4.2 | 78.6 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **8.6** | **171.9** |
-| mbpe — Python bindings | 1.28M | 6.6 | 79.0 |
-| tiktoken (Python) | 1.28M | 5.8 | 37.9 |
-| tiktoken-rs | 1.28M | 7.4 | 72.1 |
+| **mbpe — Mojo native** | 1.28M | **8.4** | **158.8** |
+| mbpe — Python bindings | 1.28M | 7.5 | 88.3 |
+| tiktoken (Python) | 1.28M | 6.1 | 40.8 |
+| tiktoken-rs | 1.28M | 7.1 | 75.1 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 39 ms | 43 ms | 53 ms | 75 ms |
-| Merges/s | 6119 | 16914 | 32749 | 49340 |
-| Encode (M tok/s) | 20.8 | 17.7 | 14.5 | 12.8 |
+| Train time | 42 ms | 44 ms | 59 ms | 84 ms |
+| Merges/s | 5678 | 16567 | 29304 | 44548 |
+| Encode (M tok/s) | 23.5 | 17.6 | 13.6 | 12.2 |
 
 *Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
@@ -284,12 +286,11 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 
 | Python class | Mojo backend | Pre-tokenizer | `name()` |
 |---|---|---|---|
-| `GPreTokenizer` | `BPETokenizer[GPreTokenizer]` | Ġ (space → U+0120 + split) | `"gpre"` |
 | `GPT2Tokenizer` | `BPETokenizer[GPT2Pretokenizer]` | r50k_base regex (7 patterns) | `"gpt2"` |
 | `GPT4Tokenizer` | `BPETokenizer[GPT4Pretokenizer[SEQUENTIAL]]` | cl100k_base regex (8 patterns) | `"cl100k"` |
 | `GPT4oTokenizer` | `BPETokenizer[GPT4Pretokenizer[SHUFFLED]]` | o200k_base regex (8 patterns, shuffled byte mapping) | `"o200k"` |
 
-All four classes share the same method interface:
+All three classes share the same method interface:
 
 | Method | Description |
 |---|---|
@@ -313,7 +314,7 @@ Module-level functions:
 | Function | Description |
 |---|---|
 | `get_encoding(name)` | Load pre-trained encoding (gpt2, cl100k, o200k) |
-| `train(texts, vocab_size)` | Train with GPreTokenizer (default) |
+| `train(texts, vocab_size)` | Train with GPT2Pretokenizer (default) |
 | `_train_impl(texts, vocab_size, pt)` | Train with specific pre-tokenizer |
 
 ---

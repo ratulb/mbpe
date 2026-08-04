@@ -18,9 +18,9 @@ Different tokenizer families use different pre-tokenization strategies:
     Digit runs are capped at 3 codepoints; letter runs can have a non-letter
     prefix; newlines are an explicit alternative.
 
-  - GPreTokenizer (legacy, ours) -- a simpler "G convention": spaces are
-    replaced with the Unicode character G (U+0120) before splitting on ASCII
-    space.  This matches the original GPT-2 Python reference code.
+  - GPT-4 / cl100k_base -- a similar but distinct 8-alternative regex.
+    Digit runs are capped at 3 codepoints; letter runs can have a non-letter
+    prefix; newlines are an explicit alternative.
 
 ================================================================================
 ARCHITECTURE
@@ -43,18 +43,16 @@ ARCHITECTURE
                        |  split(text: String)         |
                        |    -> List[String]           |
                        +------------------------------+
-                          ^              ^           ^
-                          |              |           |
-               +----------+     +--------+     +----+
-               |                |              |
-    +----------+---------+  +--+----------+  +-+--------------+
-    |   GPreTokenizer    |  |GPT2PreTok.  |  |GPT4PreTok.   |
-    |   (G convention)   |  |(r50k_base)  |  |(cl100k_base) |
-    +--------------------+  +-------------+  +---------------+
+                          ^              ^
+                          |              |
+               +----------+---------+  +-+--------------+
+               |GPT2PreTok.        |  |GPT4PreTok.     |
+               |(r50k_base)        |  |(cl100k_base)   |
+               +-------------------+  +----------------+
 
 Each struct implements the PreTokenizer trait and provides a split() method.
 The choice of which implementation to use is selected at compile time via the
-PT parameter of BPETokenizer[PT: PreTokenizer = GPreTokenizer].
+PT parameter of BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer].
 
 ================================================================================
 HOW IT PLUGS INTO BPETokenizer
@@ -93,7 +91,6 @@ FILE STRUCTURE
   -------------------------------------+---------------------------------
   Shared UTF-8 helpers                 | Low-level byte/codepoint utils
   PreTokenizer trait                   | Interface that all impls satisfy
-  GPreTokenizer                        | G convention (legacy default)
   GPT2Pretokenizer (r50k_base)         | 7-matcher regex (GPT-2)
   GPT4Pretokenizer (cl100k_base)       | 8-matcher regex (GPT-4)
 """
@@ -102,7 +99,7 @@ FILE STRUCTURE
 # Shared UTF-8 helpers
 # ===========================================================================
 #
-# All three pre-tokenizers operate on raw UTF-8 byte spans
+# All pre-tokenizers operate on raw UTF-8 byte spans
 # (Span[UInt8]).  These helpers abstract away the UTF-8 decoding so
 # that the matchers can work at the codepoint level.
 #
@@ -1062,11 +1059,11 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
 # hashing, on top of the split chain.  WordCounts fuses counting into the
 # matcher pass: the matcher hands it a (pointer, length) span, it hashes
 # the bytes in place (zero copies) and increments the count in an
-# open-addressing table.  Iteration order is first-seen order, kept in an
-# explicit `order` array — the same guarantee as Dict's documented
-# insertion order — so merge tie-breaking stays byte-for-byte reproducible.
+# open-addressing table.  Entries are assigned entry numbers 0, 1, 2, ...
+# in first-seen order — the same guarantee as Dict's documented insertion
+# order — so merge tie-breaking stays byte-for-byte reproducible.
 
-from bpe.array import IntArray, ByteArray
+from bpe.array import IntArray, ByteArray, TokenSpan, ByteSpanArena
 
 struct WordCounts(ImplicitlyCopyable & Movable):
     """Insertion-ordered word -> frequency table keyed by raw bytes.
@@ -1082,20 +1079,23 @@ struct WordCounts(ImplicitlyCopyable & Movable):
 
     How it works, at a glance:
         Every UNIQUE word gets one "entry" -- an integer index 0, 1, 2, ...
-        assigned in first-seen order. An entry's data is spread across
-        four parallel arrays, all indexed by that same entry number:
+        assigned in first-seen order. An entry's data is spread across a
+        ByteSpanArena (word bytes) plus a frequency array, all indexed by
+        that same entry number:
 
-            entry e's word bytes  = bytes[offsets[e] : offsets[e]+lengths[e]]
+            entry e's word bytes  = arena.bytes[arena.spans[e].offset :
+                                                + arena.spans[e].length]
             entry e's frequency   = counts[e]
 
         `slots` is a separate open-addressing hash table (linear probing)
         that maps a word's hash to its entry number, so add() can find an
         existing word in O(1) average time instead of scanning every
-        entry. `order` records entries in the order they were first seen,
-        independent of where they land in the hash table -- so iterating
-        `order` gives reproducible first-seen-order traversal regardless
-        of hash bucket placement, which matters for deterministic merge
-        tie-breaking during BPE training.
+        entry. Entries are numbered in first-seen order, and entry number
+        IS iteration order -- no separate `order` array is needed (unlike
+        Dict, whose bucket placement is arbitrary), so train() iterates
+        `range(n_entries)` directly for reproducible first-seen-order
+        traversal, which matters for deterministic merge tie-breaking
+        during BPE training.
 
     Fields (all public; train() walks them directly when building the
     per-word arena):
@@ -1109,31 +1109,16 @@ struct WordCounts(ImplicitlyCopyable & Movable):
                    (bitmask is cheaper than modulo, and only valid because
                    slot_cap is a power of two everywhere it's used).
 
-        offsets    entry -> starting byte offset of that word's bytes
-                   inside the `bytes` arena.
-
-        lengths    entry -> byte length of that word.
+        arena      ByteSpanArena holding every unique word's raw bytes
+                   back to back, each exactly once, with a per-entry
+                   (offset, length) span. Individual words are never
+                   stored more than once even though add() may be called
+                   on the same word thousands of times -- only counts[e]
+                   increments on repeat sightings.
 
         counts     entry -> how many times that word has been seen so far
                    (this IS the frequency table -- everything else exists
                    to compute and index into this array correctly).
-
-        order      order[0], order[1], ... are entry numbers in the
-                   sequence they were first inserted. Since entries are
-                   already assigned in first-seen order (entry 0 is the
-                   first unique word ever seen, entry 1 the second, etc.),
-                   `order` is currently always just [0, 1, 2, ..., n-1] --
-                   but it's kept as an explicit array (rather than relying
-                   on that implicit fact) so iteration order stays a
-                   documented guarantee even if entry assignment ever
-                   changes, and so callers can iterate `order` without
-                   needing to know entries happen to already be sequential.
-
-        bytes      A single flat byte buffer holding every unique word's
-                   raw bytes, back to back, each exactly once. Individual
-                   words are never stored more than once even though
-                   add() may be called on the same word thousands of
-                   times -- only counts[e] increments on repeat sightings.
 
         n_entries  Total number of unique words seen so far. Also the
                    next entry number that will be assigned.
@@ -1145,9 +1130,9 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         var wc = WordCounts()
         for each word span found while splitting the corpus:
             wc.add(word_ptr, word_len)
-        # afterwards, for e in wc.order: wc.counts[e] is that word's
-        # frequency, and wc.bytes[wc.offsets[e]:...+wc.lengths[e]] is
-        # its raw bytes.
+        # afterwards, for e in range(wc.n_entries): wc.counts[e] is that
+        # word's frequency, and wc.arena.bytes[wc.arena.spans[e].offset :
+        # +wc.arena.spans[e].length] is its raw bytes.
     """
 
     comptime FNV_offset_basis = UInt64(0xCBF29CE484222325)
@@ -1160,12 +1145,9 @@ struct WordCounts(ImplicitlyCopyable & Movable):
     definition -- chosen for good bit-mixing properties, not a value
     that can be changed without changing the hash function's behavior)."""
 
+    var arena: ByteSpanArena
     var slots: IntArray
-    var offsets: IntArray
-    var lengths: IntArray
     var counts: IntArray
-    var order: IntArray
-    var bytes: ByteArray
     var n_entries: Int
     var slot_cap: Int
 
@@ -1193,24 +1175,19 @@ struct WordCounts(ImplicitlyCopyable & Movable):
             cap *= 2
         self.slot_cap = cap
         self.slots = IntArray(length=cap, fill=0)  # 0 = every slot empty
-        self.offsets = IntArray(capacity=capacity)
-        self.lengths = IntArray(capacity=capacity)
+        self.arena = ByteSpanArena()
+        self.arena.spans.reserve(capacity)
         self.counts = IntArray(capacity=capacity)
-        self.order = IntArray(capacity=capacity)
-        self.bytes = ByteArray()
         self.n_entries = 0
 
     def __init__(out self, *, copy: Self):
         """Deep-copy constructor -- every backing array is independently
-        duplicated (via each array's own .copy()), so mutating the copy
-        never affects the original and vice versa."""
+        duplicated, so mutating the copy never affects the original and
+        vice versa."""
         self.slot_cap = copy.slot_cap
         self.slots = copy.slots.copy()
-        self.offsets = copy.offsets.copy()
-        self.lengths = copy.lengths.copy()
+        self.arena = ByteSpanArena(copy=copy.arena)
         self.counts = copy.counts.copy()
-        self.order = copy.order.copy()
-        self.bytes = copy.bytes.copy()
         self.n_entries = copy.n_entries
 
     def __init__(out self, *, deinit move: Self):
@@ -1220,21 +1197,18 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         consumed and can't be used afterward."""
         self.slot_cap = move.slot_cap
         self.slots = move.slots^
-        self.offsets = move.offsets^
-        self.lengths = move.lengths^
+        self.arena = move.arena^
         self.counts = move.counts^
-        self.order = move.order^
-        self.bytes = move.bytes^
         self.n_entries = move.n_entries
 
     def _rehash(mut self, new_cap: Int):
         """Grow the hash table to `new_cap` slots and reinsert every
         existing entry into it.
 
-        Only the `slots` array is rebuilt here -- offsets/lengths/counts/
-        order/bytes are untouched, since entry numbers and their data
-        never change across a rehash, only *where in `slots` each entry's
-        pointer lives* changes (because the bucket index depends on
+        Only the `slots` array is rebuilt here -- arena/counts are
+        untouched, since entry numbers and their data never change across
+        a rehash, only *where in `slots` each entry's pointer lives*
+        changes (because the bucket index depends on
         `hash & (slot_cap - 1)`, which shifts once slot_cap changes).
 
         Called automatically by add() once the table gets too full (see
@@ -1248,11 +1222,13 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         self.slots = IntArray(length=new_cap, fill=0)
         self.slot_cap = new_cap
         var nsp = self.slots.unsafe_ptr()
-        var bp = self.bytes.unsafe_ptr()
+        var bp = self.arena.bytes.unsafe_ptr()
         # Re-walk every existing entry (in entry-number order) and
         # reinsert it into the freshly-sized, freshly-zeroed slots array.
         for e in range(self.n_entries):
-            var h = Self._fnv1a64(bp + self.offsets[e], self.lengths[e])
+            var h = Self._fnv1a64(
+                bp + self.arena.spans[e].offset, self.arena.spans[e].length
+            )
             var idx = Int(h & UInt64(new_cap - 1))
             # Linear probe forward until an empty slot is found -- same
             # probing rule used in add(), so lookups after a rehash land
@@ -1270,8 +1246,8 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         If this exact byte sequence has been seen before, its existing
         entry's count is incremented by 1 (O(1) average case, no
         allocation). If it's new, a new entry is created: its bytes are
-        copied once into the `bytes` arena, and offsets/lengths/counts/
-        order/slots are all updated to track it.
+        copied once into the arena, and counts/slots are updated to track
+        it.
 
         Zero-length words are silently ignored (a no-op) rather than
         treated as a valid empty-string entry.
@@ -1308,8 +1284,10 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         var idx = Int(h & UInt64(self.slot_cap - 1))
         while sp[idx] != 0:
             var e = sp[idx] - 1  # stored entries are offset by +1; undo it
-            if self.lengths[e] == length and memcmp(
-                self.bytes.unsafe_ptr() + self.offsets[e], ptr, length
+            if self.arena.spans[e].length == length and memcmp(
+                self.arena.bytes.unsafe_ptr() + self.arena.spans[e].offset,
+                ptr,
+                length,
             ) == 0:
                 # Found: same length and byte-identical -> same word.
                 self.counts[e] += 1
@@ -1318,17 +1296,11 @@ struct WordCounts(ImplicitlyCopyable & Movable):
             idx = (idx + 1) & (self.slot_cap - 1)
         # Reached an empty slot without finding a match -> genuinely new
         # word. Create entry `e`, copy its bytes into the arena once,
-        # and register it in every parallel array plus the hash table.
+        # and register it in the frequency array plus the hash table.
         var e = self.n_entries
-        var boff = len(self.bytes)
-        self.bytes.reserve(boff + length)
-        for i in range(length):
-            self.bytes.append(ptr[i])
+        _ = self.arena.add(ptr, length)
         sp[idx] = e + 1
-        self.offsets.append(boff)
-        self.lengths.append(length)
         self.counts.append(1)
-        self.order.append(e)
         self.n_entries += 1
 
     def add[origin: Origin, //](mut self, span: Span[UInt8, origin]):
@@ -1402,9 +1374,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
 
     Pre-tokenizers that only slice the input (GPT-2 r50k_base, GPT-4
     cl100k_base / o200k_base) override split_view for maximum encode
-    throughput.  Pre-tokenizers that transform the input (GPreTokenizer
-    with its Ġ spacer insertion) override split directly since their
-    output words are already freshly allocated.
+    throughput.
 
     Byte mapping
     ------------
@@ -1456,8 +1426,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         input ``text``.  Used by the encode hot path.
 
         Default: return the entire input as a single word (correct for
-        pre-tokenizers that don't subdivide text — e.g., GPreTokenizer
-        transforms text, so it's not a pure slice).
+        pre-tokenizers that don't subdivide text).
 
         Override in pre-tokenizers that slice the input (GPT2Pretokenizer,
         GPT4Pretokenizer) for zero-allocation encode.
@@ -1473,8 +1442,6 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         """Split text into owned word strings.
 
         Default implementation wraps split_view into String allocations.
-        Override directly when the pre-tokenizer transforms the input
-        (e.g., GPreTokenizer inserts spacers).
 
         Legacy API — train() uses count_words() (below), which never
         materializes words.
@@ -1494,8 +1461,7 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         counting (one String allocation per word), the matcher hands each
         word span straight to ``counts``, which hashes the bytes in place.
         The default implementation delegates to split_view; GPT2Pretokenizer
-        and GPT4Pretokenizer override with an inlined matcher loop, and
-        GPreTokenizer overrides via its transforming split.
+        and GPT4Pretokenizer override with an inlined matcher loop.
         """
         ref views = self.split_view(text)
         for v in views:
@@ -1596,91 +1562,6 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
         if is_ascii_ws_byte(Int(span[pos])):
             return 1
         return 0
-
-
-# ===========================================================================
-# GPreTokenizer -- G convention (legacy, backward-compatible default)
-# ===========================================================================
-#
-# This pre-tokenizer replicates the approach from OpenAI's GPT-2 Python
-# reference implementation (encoder.py).  It uses the Unicode character
-# G (Latin capital letter G with breve, U+0120) as a spacer marker:
-#
-#   1. Replace every ASCII space (0x20) with " G"  (space + spacer)
-#   2. Replace every "." with " ."  (separate period from surrounding)
-#   3. Split on ASCII space
-#
-# This ensures that word-boundary spaces are preserved as the first
-# character of each word token (the G prefix), which the decoder then
-# reverses by replacing G back to 0x20.
-#
-# Why it exists: this was the original pre-tokenizer, matching the
-# simple Python-level GPT-2 reference.  It is still the default for
-# backward compatibility, but new development should use
-# GPT2Pretokenizer or GPT4Pretokenizer for accuracy.
-
-
-struct GPreTokenizer(PreTokenizer):
-    comptime byte_map: ByteMapping = ByteMapping.SEQUENTIAL
-
-    def __init__(out self):
-        pass
-
-    @staticmethod
-    def name() -> String:
-        return String("gpre")
-
-    @staticmethod
-    def special_tokens() -> Dict[String, Int]:
-        return Dict[String, Int]()
-
-    @staticmethod
-    def tokenize[
-        mut: Bool,
-        //,
-        origin: Origin[mut=mut],
-        spacer: StaticString = "\u0120",
-    ](text: StringSlice[origin]) raises -> List[String]:
-        """Apply the G-convention split (static method version).
-
-        This is the legacy interface -- called with explicit parameters
-        during early development.  The trait-aware split method below
-        is the modern entry point.
-
-        Args:
-            text: Input string or string slice.
-            spacer: The spacer character (default U+0120).
-
-        Returns:
-            List of word strings, each starting with G if it was
-            preceded by an ASCII space in the original text.
-        """
-        var splits = (
-            text.replace(" ", " " + spacer).replace(".", " .").split(" ")
-        )
-        var result = List[String](capacity=len(splits))
-        for split in splits:
-            result.append(String(from_utf8=split.as_bytes()))
-        return result^
-
-    def split[
-        mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin]) raises -> List[String]:
-        return Self.tokenize(text)
-
-    def count_words[
-        mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
-        # GPre transforms text (spacer insertion), so words can't be
-        # sliced out of the input — reuse the tested transform split and
-        # feed the resulting display strings into the counter.  Correctness
-        # is inherited from tokenize(); GPre is not the benchmarked path.
-        var words = Self.tokenize(text)
-        for w in words:
-            counts.add(w.as_bytes())
-
-    def write_to[T: Writer](self, mut writer: T):
-        writer.write(String("GPreTokenizer"))
 
 
 # ===========================================================================

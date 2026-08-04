@@ -60,9 +60,9 @@ class TestEncodeDecode:
         ids_ord = tok.encode_ordinary(text)
         assert ids == ids_ord
 
-    def test_single_byte_gpre(self):
+    def test_single_byte_gpt2(self):
         import mbpe
-        tok = mbpe.GPreTokenizer()
+        tok = mbpe.GPT2Tokenizer()
         tok.train(["a b c"], 260)
         ids = tok.encode("a")
         assert ids == [97]

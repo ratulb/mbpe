@@ -120,7 +120,7 @@ mojo_5mb = load(os.path.join(RESULTS_DIR, "mojo_5MB.json"))
 
 print("| Variant | Train (ms, v=500) | Encode (ms, v=500) | Encode (M tok/s) | Decode (ms, v=500) | Decode (M tok/s) |")
 print("|---------|-------------------|--------------------|-----------------|--------------------|-----------------|")
-for variant in ["GPre", "GPT2", "GPT4"]:
+for variant in ["GPT2", "GPT4"]:
     r = next((x for x in mojo_5mb if x['variant'] == variant and x['vocab_size'] == 500), {})
     print(
         f"| {variant} "

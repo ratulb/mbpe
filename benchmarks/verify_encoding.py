@@ -3,13 +3,13 @@
 
 Usage:
     # Encode text and print token IDs (default text if not provided via stdin)
-    echo "Hello world!" | python benchmarks/verify_encoding.py /tmp/bpe.json gpre
+    echo "Hello world!" | python benchmarks/verify_encoding.py /tmp/bpe.json gpt2
 
     # Encode from file
-    python benchmarks/verify_encoding.py /tmp/bpe.json gpre < input.txt
+    python benchmarks/verify_encoding.py /tmp/bpe.json gpt2 < input.txt
 
     # Full-encode a JSONL of test strings, compare with Mojo output
-    python benchmarks/verify_encoding.py /tmp/bpe.json gpre --check-mojo mojo_out.json
+    python benchmarks/verify_encoding.py /tmp/bpe.json gpt2 --check-mojo mojo_out.json
 """
 
 import json
@@ -37,12 +37,7 @@ def load_tokenizer(path):
 
 def encode(text, tokenizer, variant):
     merge_cache = tokenizer["merge_cache"]
-    if variant == "gpre":
-        spacer = "Ġ"
-        t = text.replace(" ", " " + spacer)
-        t = t.replace(".", " .")
-        words = t.split(" ")
-    elif variant == "gpt2":
+    if variant == "gpt2":
         words = re.findall(GPT2_PAT, text)
     elif variant == "gpt4":
         words = re.findall(GPT4_PAT, text)

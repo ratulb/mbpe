@@ -136,12 +136,6 @@ class _BaseTokenizer:
         return getattr(self._tok, name)
 
 
-class GPreTokenizer(_BaseTokenizer):
-    _TOK_CLS = _mbpe.GPreTokenizer
-    def _make_tok(self):
-        return self._TOK_CLS()
-
-
 class GPT2Tokenizer(_BaseTokenizer):
     _TOK_CLS = _mbpe.GPT2Tokenizer
     def _make_tok(self):
@@ -221,7 +215,7 @@ def get_encoding(name):
 
 
 def train(texts, vocab_size):
-    """Train a GPreTokenizer wrapper instance.
+    """Train a GPT2Pretokenizer-based tokenizer instance.
 
     Parameters
     ----------
@@ -232,20 +226,19 @@ def train(texts, vocab_size):
 
     Returns
     -------
-    GPreTokenizer
+    GPT2Tokenizer
         Trained tokenizer.
     """
-    return _train_impl(texts, vocab_size, "gpre")
+    return _train_impl(texts, vocab_size, "gpt2")
 
 
 _PT_MAP = {
-    "gpre": GPreTokenizer,
     "gpt2": GPT2Tokenizer,
     "gpt4": GPT4Tokenizer,
 }
 
 
-def _train_impl(texts, vocab_size, pretokenizer="gpre"):
+def _train_impl(texts, vocab_size, pretokenizer="gpt2"):
     """Train a tokenizer with the specified pretokenizer.
 
     Parameters
@@ -255,11 +248,11 @@ def _train_impl(texts, vocab_size, pretokenizer="gpre"):
     vocab_size : int
         Target vocabulary size.
     pretokenizer : str
-        One of ``"gpre"``, ``"gpt2"``, or ``"gpt4"``.
+        One of ``"gpt2"`` or ``"gpt4"``.
 
     Returns
     -------
-    GPreTokenizer | GPT2Tokenizer | GPT4Tokenizer
+    GPT2Tokenizer | GPT4Tokenizer
         Trained tokenizer wrapper.
     """
     cls = _PT_MAP.get(pretokenizer)

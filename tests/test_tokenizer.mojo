@@ -94,7 +94,10 @@ def test_full_hf_corpus() raises:
     tok.save_tiktoken("/tmp/bpe_hf_test.tiktoken")
     var loaded = BPETokenizer()
     loaded.load_tiktoken("/tmp/bpe_hf_test.tiktoken")
-    assert_equal(len(loaded), len(tok))
+    # GPT2 auto-registers <|endoftext|> (gap-padding the table), so total
+    # length grows; merge rules and encode behavior are what must match.
+    assert_equal(len(loaded.merges), len(tok.merges))
+    assert_true(50256 in loaded.inverse_special)
     assert_equal(
         loaded.decode(loaded.encode(String("This is not a token."))),
         "This is not a token.",
@@ -179,8 +182,7 @@ def test_unicode_roundtrip() raises:
 
 def test_token_table_copy_semantics() raises:
     """Verify TokenByteTable copy semantics: deep copy of the byte pool and
-    index lists, and the offsets sentinel (offsets[size] == len(bytes)) is
-    maintained by add/set_bytes.
+    span list.
     """
     var corpus = List[String]()
     corpus.append(String("hello world"))
@@ -189,25 +191,21 @@ def test_token_table_copy_semantics() raises:
 
     var table = tok.token_table
     assert_true(len(table) > 256)
-    assert_equal(table.offsets[len(table)], len(table.bytes))
 
     # Deep copy is independent: growing the original must not touch it.
     var before_size = len(table)
-    var before_bytes = len(table.bytes)
+    var before_bytes = len(table.arena.bytes)
     tok.token_table.set_bytes(len(tok.token_table), String("ab").as_bytes())
     assert_true(len(tok.token_table) == before_size + 1)
     assert_true(len(table) == before_size)
-    assert_true(len(table.bytes) == before_bytes)
+    assert_true(len(table.arena.bytes) == before_bytes)
 
     # A second copy stays independent too (no sharing).
     var copy2 = tok.token_table
     copy2.set_bytes(len(copy2), String("cd").as_bytes())
     assert_true(len(copy2) == len(tok.token_table) + 1)
     assert_true(len(tok.token_table) == before_size + 1)
-    assert_equal(tok.token_table.offsets[len(tok.token_table)],
-        len(tok.token_table.bytes))
-    assert_equal(copy2.offsets[len(copy2)], len(copy2.bytes))
-    assert_equal(tok.token_table.lengths[97], 1)
+    assert_equal(tok.token_table.arena.spans[97].length, 1)
 
     # Tokenizer still decodes correctly after copies.
     assert_equal(tok.decode(tok.encode(String("hello world"))), "hello world")

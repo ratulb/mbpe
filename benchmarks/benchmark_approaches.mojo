@@ -1,7 +1,7 @@
 """Benchmark comparing three encode approaches."""
 
 from bpe.tokenizer import BPETokenizer
-from bpe.pretokenizer import GPreTokenizer
+from bpe.pretokenizer import GPT2Pretokenizer
 from std.time import perf_counter_ns
 
 
@@ -67,12 +67,13 @@ struct TokenBytes:
         self._lengths = List[Int]()
 
     def build(mut self, tok: BPETokenizer) raises:
-        for id in range(len(tok)):
-            var s = tok.vocab[id]
+        var values = tok.token_byte_values()
+        for id in range(len(values)):
+            var bytes = values[id].copy()
             self._offsets.append(len(self._data))
             var count = 0
-            for cp in s.codepoints():
-                self._data.append(UInt8(tok.cp_to_byte[Int(cp)]))
+            for i in range(len(bytes)):
+                self._data.append(bytes[i])
                 count += 1
             self._lengths.append(count)
 
@@ -277,7 +278,7 @@ def encode_baseline(tok: BPETokenizer, text: String) raises -> List[Int]:
 
 def encode_ranked(tok: BPETokenizer, text: String, ref rank: RankTable,
                   ref bytes: TokenBytes) raises -> List[Int]:
-    var words = GPreTokenizer.tokenize(text)
+    var words = GPT2Pretokenizer().split(text)
     var result = List[Int]()
     for word in words:
         var word_ids = _encode_word_ranked(tok, word.as_bytes(), rank, bytes)
@@ -286,7 +287,7 @@ def encode_ranked(tok: BPETokenizer, text: String, ref rank: RankTable,
     return result^
 
 def encode_paircache(tok: BPETokenizer, text: String, ref cache: PairCache) raises -> List[Int]:
-    var words = GPreTokenizer.tokenize(text)
+    var words = GPT2Pretokenizer().split(text)
     var result = List[Int]()
     for word in words:
         var word_ids = _encode_word_paircache(tok, word.as_bytes(), cache)
@@ -306,8 +307,10 @@ def run() raises:
 
     print("\nBuilding corpus and training...")
     var corpus = build_corpus()
+    var corpus_list = List[String]()
+    corpus_list.append(corpus)
     var tok = BPETokenizer()
-    tok.train([corpus], 500)
+    tok.train(corpus_list, 500)
 
     print("Building shared data structures...")
     var bytes = TokenBytes()

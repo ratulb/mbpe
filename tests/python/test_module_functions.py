@@ -49,7 +49,7 @@ class TestModuleTrain:
     def test_train_basic(self):
         import mbpe
         tok = mbpe.train(["hello world"], 256)
-        assert tok.name() == "gpre"
+        assert tok.name() == "gpt2"
         assert tok.n_vocab == 256
 
     def test_train_impl_gpt2(self):

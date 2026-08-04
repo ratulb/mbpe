@@ -4,11 +4,6 @@ import pytest
 
 
 class TestName:
-    def test_name_gpre(self):
-        import mbpe
-        tok = mbpe.GPreTokenizer()
-        assert tok.name() == "gpre"
-
     def test_name_gpt2(self):
         import mbpe
         tok = mbpe.GPT2Tokenizer()
@@ -63,9 +58,9 @@ class TestTokenByteValues:
 
 
 class TestDecodeSingleTokenBytes:
-    def test_decode_single_token_bytes_ascii_gpre(self):
+    def test_decode_single_token_bytes_ascii_gpt2(self):
         import mbpe
-        tok = mbpe.GPreTokenizer()
+        tok = mbpe.GPT2Tokenizer()
         tok.train(["a b c"], 260)
         assert tok.decode_single_token_bytes(97) == b"a"
 

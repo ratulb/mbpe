@@ -239,7 +239,6 @@ def make_summary(mbpe_py, py_tiktoken, n_bytes):
 # ── Combined Comparison Table ───────────────────────────────────
 
 VARIANT_LABELS = {
-    "GPre": "GPreTokenizer (Ġ)",
     "GPT2": "GPT2Pretokenizer (r50k_base)",
     "GPT4": "GPT4Pretokenizer (cl100k_base)",
 }
@@ -366,7 +365,7 @@ def make_scaling_tables(mojo_rows):
     lines.append("")
     lines.append("| Variant | Vocab=500 | Vocab=1000 | Vocab=2000 | Vocab=4000 |")
     lines.append("|---------|-----------|------------|------------|------------|")
-    for variant in ["GPre", "GPT2", "GPT4"]:
+    for variant in ["GPT2", "GPT4"]:
         var_label = VARIANT_LABELS.get(variant, variant)
         row = []
         for vs in [500, 1000, 2000, 4000]:
@@ -381,7 +380,7 @@ def make_scaling_tables(mojo_rows):
     lines.append("")
     lines.append("| Variant | Vocab=500 | Vocab=1000 | Vocab=2000 | Vocab=4000 |")
     lines.append("|---------|-----------|------------|------------|------------|")
-    for variant in ["GPre", "GPT2", "GPT4"]:
+    for variant in ["GPT2", "GPT4"]:
         var_label = VARIANT_LABELS.get(variant, variant)
         row = []
         for vs in [500, 1000, 2000, 4000]:
