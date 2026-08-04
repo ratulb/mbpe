@@ -7,7 +7,7 @@ from std.time import perf_counter_ns
 def main() raises:
     var text = Path("benchmarks/corpus.txt").read_text()
     var corpus = List[String]()
-    corpus.append(String(text))
+    corpus.append(text)
     var tok = BPETokenizer()
     print("Training...")
     tok.train(corpus, 500)
