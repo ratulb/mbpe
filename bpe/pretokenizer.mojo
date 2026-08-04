@@ -1280,20 +1280,30 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         if self.n_entries * 2 >= self.slot_cap:
             self._rehash(self.slot_cap * 2)
         var h = Self._fnv1a64(ptr, length)
+        # Hoist every field chain the probe loop reads.  arena.spans,
+        # arena.bytes and counts are only reallocated by the new-entry
+        # path AFTER the probe loop exits (arena.add / counts.append
+        # below), so these raw pointers stay valid throughout the loop
+        # -- and because LLVM sees realloc-capable calls in the loop
+        # body it would otherwise reload the chains on every probe step.
+        var slot_cap = self.slot_cap
         var sp = self.slots.unsafe_ptr()
-        var idx = Int(h & UInt64(self.slot_cap - 1))
+        var spans_ptr = self.arena.spans.unsafe_ptr()
+        var bytes_ptr = self.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var counts_ptr = self.counts.unsafe_ptr()
+        var idx = Int(h & UInt64(slot_cap - 1))
         while sp[idx] != 0:
             var e = sp[idx] - 1  # stored entries are offset by +1; undo it
-            if self.arena.spans[e].length == length and memcmp(
-                self.arena.bytes.unsafe_ptr() + self.arena.spans[e].offset,
+            if spans_ptr[e].length == length and memcmp(
+                bytes_ptr + spans_ptr[e].offset,
                 ptr,
                 length,
             ) == 0:
                 # Found: same length and byte-identical -> same word.
-                self.counts[e] += 1
+                counts_ptr[e] = counts_ptr[e] + 1
                 return
             # Occupied by a different word (hash collision) -> probe next.
-            idx = (idx + 1) & (self.slot_cap - 1)
+            idx = (idx + 1) & (slot_cap - 1)
         # Reached an empty slot without finding a match -> genuinely new
         # word. Create entry `e`, copy its bytes into the arena once,
         # and register it in the frequency array plus the hash table.

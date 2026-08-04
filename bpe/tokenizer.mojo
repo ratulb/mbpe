@@ -1283,10 +1283,11 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         """
         if id < 0 or id >= len(self.token_table):
             raise Error("token ID out of range: " + String(id))
-        var n = self.token_table.arena.spans.unsafe_ptr()[id].length
+        var spans = self.token_table.arena.spans.unsafe_ptr()
+        var n = spans[id].length
         if n == 0:
             return ByteArray()
-        var off = self.token_table.arena.spans.unsafe_ptr()[id].offset
+        var off = spans[id].offset
         var ptr = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
         var result = ByteArray(capacity=n)
         result.resize(n, 0)
@@ -1701,6 +1702,8 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         Args:
             path: File path to write the .tiktoken file to.
         """
+        var spans = self.token_table.arena.spans.unsafe_ptr()
+        var pool = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
         with open(path, "w") as f:
             for token_id in range(len(self.token_table)):
                 if token_id in self.inverse_special:
@@ -1709,15 +1712,14 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
                 # stores real byte sequences) directly from the span
                 # table -- since token_table holds raw bytes verbatim,
                 # the display string and the stored bytes coincide.
-                var span = self.token_table.arena.spans[token_id]
+                var span = spans[token_id]
                 if span.length == 0:
                     continue
                 var raw = ByteArray(capacity=span.length)
                 raw.resize(span.length, 0)
                 memcpy(
                     dest=raw.unsafe_ptr(),
-                    src=self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
-                    + span.offset,
+                    src=pool + span.offset,
                     count=span.length,
                 )
                 var encoded = b64encode(Span[Byte](raw))
