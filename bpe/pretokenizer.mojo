@@ -1063,7 +1063,7 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
 # in first-seen order — the same guarantee as Dict's documented insertion
 # order — so merge tie-breaking stays byte-for-byte reproducible.
 
-from bpe.array import IntArray, ByteArray, TokenSpan, ByteSpanArena
+from bpe.shared import IntArray, ByteArray, TokenSpan, ByteSpanArena
 
 struct WordCounts(ImplicitlyCopyable & Movable):
     """Insertion-ordered word -> frequency table keyed by raw bytes.

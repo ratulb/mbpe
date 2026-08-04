@@ -1,6 +1,6 @@
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
-from bpe.array import ByteArray
+from bpe.shared import ByteArray
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, TestSuite
 from std.base64 import b64decode

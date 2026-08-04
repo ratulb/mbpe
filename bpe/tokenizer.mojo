@@ -45,7 +45,7 @@ from bpe.pretokenizer import (
     ByteMapping,
     WordCounts,
 )
-from bpe.array import IntArray, ByteArray, TokenSpan, ByteSpanArena
+from bpe.shared import IntArray, ByteArray, TokenSpan, ByteSpanArena
 
 
 # ---------------------------------------------------------------------------
