@@ -169,36 +169,36 @@ tok.train((["hello world"]), 300)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **13.3** | **169.9** |
-| mbpe — Python bindings | 1.54M | 11.6 | 92.2 |
-| tiktoken (Python) | 1.54M | 4.8 | 40.4 |
-| tiktoken-rs | 1.53M | 4.3 | 65.6 |
+| **mbpe — Mojo native** | 1.54M | **15.5** | **172.9** |
+| mbpe — Python bindings | 1.54M | 12.5 | 98.5 |
+| tiktoken (Python) | 1.54M | 5.5 | 43.3 |
+| tiktoken-rs | 1.53M | 4.9 | 72.2 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **11.0** | **176.0** |
-| mbpe — Python bindings | 1.28M | 9.2 | 81.4 |
-| tiktoken (Python) | 1.28M | 4.4 | 38.3 |
-| tiktoken-rs | 1.28M | 4.2 | 78.6 |
+| **mbpe — Mojo native** | 1.28M | **11.9** | **171.5** |
+| mbpe — Python bindings | 1.28M | 10.2 | 92.0 |
+| tiktoken (Python) | 1.28M | 4.8 | 47.8 |
+| tiktoken-rs | 1.28M | 4.6 | 80.2 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **8.4** | **158.8** |
-| mbpe — Python bindings | 1.28M | 7.5 | 88.3 |
-| tiktoken (Python) | 1.28M | 6.1 | 40.8 |
-| tiktoken-rs | 1.28M | 7.1 | 75.1 |
+| **mbpe — Mojo native** | 1.28M | **8.8** | **186.5** |
+| mbpe — Python bindings | 1.28M | 8.1 | 95.8 |
+| tiktoken (Python) | 1.28M | 7.4 | 47.9 |
+| tiktoken-rs | 1.28M | 8.3 | 79.9 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 42 ms | 44 ms | 59 ms | 84 ms |
-| Merges/s | 5678 | 16567 | 29304 | 44548 |
-| Encode (M tok/s) | 23.5 | 17.6 | 13.6 | 12.2 |
+| Train time | 37 ms | 40 ms | 47 ms | 64 ms |
+| Merges/s | 6444 | 18340 | 36424 | 57924 |
+| Encode (M tok/s) | 24.7 | 19.2 | 15.5 | 13.6 |
 
 *Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 

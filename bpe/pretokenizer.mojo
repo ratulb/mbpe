@@ -451,7 +451,6 @@ comptime BYTE_CLASS = SIMD[DType.int32, 256](
 )
 
 
-
 # ── SWAR helpers (ASCII class scan, 8 bytes at a time) ────────────────────
 # These implement the same byte classes as BYTE_CLASS but operate on 8
 # bytes packed into a UInt64, so the letter/digit runs of the ASCII fast
@@ -1065,6 +1064,7 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
 
 from bpe.shared import IntArray, ByteArray, TokenSpan, ByteSpanArena
 
+
 struct WordCounts(ImplicitlyCopyable & Movable):
     """Insertion-ordered word -> frequency table keyed by raw bytes.
 
@@ -1294,11 +1294,15 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         var idx = Int(h & UInt64(slot_cap - 1))
         while sp[idx] != 0:
             var e = sp[idx] - 1  # stored entries are offset by +1; undo it
-            if spans_ptr[e].length == length and memcmp(
-                bytes_ptr + spans_ptr[e].offset,
-                ptr,
-                length,
-            ) == 0:
+            if (
+                spans_ptr[e].length == length
+                and memcmp(
+                    bytes_ptr + spans_ptr[e].offset,
+                    ptr,
+                    length,
+                )
+                == 0
+            ):
                 # Found: same length and byte-identical -> same word.
                 counts_ptr[e] = counts_ptr[e] + 1
                 return

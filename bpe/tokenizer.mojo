@@ -266,6 +266,7 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
 
 # ---------------------------------------------------------------------------
 
+
 struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
     Sized & Movable & Writable
 ):
@@ -552,7 +553,9 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         # for one single allocation up front, since arena stores each
         # distinct word's tokens once regardless of its frequency).
         var total_tokens: Int = 0
-        for ei in range(word_counts.n_entries):  # ei = entry index into word_counts
+        for ei in range(
+            word_counts.n_entries
+        ):  # ei = entry index into word_counts
             total_tokens += word_counts.arena.spans[ei].length
         var arena = IntArray(capacity=total_tokens)
         var word_offs = IntArray(
@@ -571,7 +574,9 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             Int, IntArray
         ]()  # packed pair key -> list of word indices that currently contain this pair
         var wb = word_counts.arena.bytes.unsafe_ptr()
-        for ei in range(word_counts.n_entries):  # ei = entry index (same as above)
+        for ei in range(
+            word_counts.n_entries
+        ):  # ei = entry index (same as above)
             var off = word_counts.arena.spans[ei].offset
             var ln = word_counts.arena.spans[ei].length
             var freq = word_counts.counts[ei]
@@ -728,13 +733,23 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             # concatenated (pure byte concat -- no display round-trip,
             # no spacer collapse, since nothing is re-encoded).
             var spans = self.token_table.arena.spans.unsafe_ptr()
-            var pool = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+            var pool = (
+                self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+            )
             var la = spans[a_id].length
             var lb = spans[b_id].length
             var merged_bytes = ByteArray(capacity=la + lb)
             merged_bytes.resize(la + lb, 0)
-            memcpy(dest=merged_bytes.unsafe_ptr(), src=pool + spans[a_id].offset, count=la)
-            memcpy(dest=merged_bytes.unsafe_ptr() + la, src=pool + spans[b_id].offset, count=lb)
+            memcpy(
+                dest=merged_bytes.unsafe_ptr(),
+                src=pool + spans[a_id].offset,
+                count=la,
+            )
+            memcpy(
+                dest=merged_bytes.unsafe_ptr() + la,
+                src=pool + spans[b_id].offset,
+                count=lb,
+            )
             self.token_table.add(Span[Byte](merged_bytes))
 
     # ── encoding ─────────────────────────────────────────────────────────
@@ -1349,7 +1364,9 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             # just captured at two different points in the loop.
             starts.append(write_offset)
             if n > 0:
-                memcpy(dest=dst + write_offset, src=ptr + spans[id].offset, count=n)
+                memcpy(
+                    dest=dst + write_offset, src=ptr + spans[id].offset, count=n
+                )
                 write_offset += n
             ends.append(write_offset)
         return result^

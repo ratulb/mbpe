@@ -4,9 +4,13 @@ from std.memory import memcpy
 comptime IntArray = List[Int]
 comptime ByteArray = List[Byte]
 
-
+@fieldwise_init
 struct TokenSpan(
-    ImplicitlyCopyable & Movable & TrivialRegisterPassable & Equatable & Writable
+    ImplicitlyCopyable
+    & Movable
+    & TrivialRegisterPassable
+    & Equatable
+    & Writable
 ):
     """One entry's slice of a byte arena: (offset, length) into `bytes`.
 
@@ -15,15 +19,9 @@ struct TokenSpan(
     two parallel IntArrays) keeps every entry's bounds in a single cache
     line on the hot paths.
     """
+
     var offset: Int
     var length: Int
-
-    def __init__(out self, offset: Int, length: Int):
-        self.offset = offset
-        self.length = length
-
-    def __eq__(self, other: Self) -> Bool:
-        return self.offset == other.offset and self.length == other.length
 
     def write_to[T: Writer](self, mut writer: T):
         writer.write(
@@ -42,6 +40,7 @@ struct ByteSpanArena(ImplicitlyCopyable & Movable & Sized & Writable):
     via `bytes.extend`) and returns the new span's index.  Shared by
     TokenByteTable (per-token bytes) and WordCounts (per-word bytes).
     """
+
     var bytes: ByteArray
     var spans: List[TokenSpan]
 
