@@ -94,7 +94,6 @@ comptime CACHE_SIZE: Int = 1000
 comptime CACHE_ENTRIES: Int = 1 << (CACHE_SHIFT * 2)
 comptime ENCODE_SHIFT: Int = 20
 comptime ENCODE_MASK: Int = (1 << ENCODE_SHIFT) - 1
-comptime SEP: Int = -1
 # Heap candidates pack (rank, position) into one Int: rank << HEAP_SHIFT | idx.
 # rank < 2^24 (vocab ≤ ~200K) and idx < 2^24 (word byte length); the key is
 # negated when pushed because BinaryHeap pops the maximum.
@@ -645,7 +644,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         # for one single allocation up front, since arena stores each
         # distinct word's tokens once regardless of its frequency).
         var total_tokens: Int = 0
-        for ei in word_counts.order:
+        for ei in word_counts.order:  # ei = entry index into word_counts
             total_tokens += word_counts.lengths[ei]
         var arena = IntArray(capacity=total_tokens)
         var word_offs = IntArray(
@@ -664,7 +663,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             Int, IntArray
         ]()  # packed pair key -> list of word indices that currently contain this pair
         var wb = word_counts.bytes.unsafe_ptr()
-        for ei in word_counts.order:
+        for ei in word_counts.order:  # ei = entry index (same as above)
             var off = word_counts.offsets[ei]
             var ln = word_counts.lengths[ei]
             var freq = word_counts.counts[ei]
@@ -678,7 +677,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                 arena.append(Self.PT.byte_to_id(Int(wb[off + i])))
             word_len.append(ln)
             word_freq.append(freq)
-            var iw = len(word_offs) - 1
+            var iw = len(word_offs) - 1  # iw = index of this word
             # Seed initial pair statistics: every adjacent pair within
             # this word contributes `freq` to that pair's total count
             # (since this word-shape occurs `freq` times in the corpus),
@@ -700,7 +699,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
         self.lookup_table = MergeLookup()
         self.merges = List[MergeRule]()
         while len(self.vocab) < vocab_size:
-            # Find the most frequent pair that does not involve SEP.
+            # Find the most frequent pair.
             # (Linear scan over `stats` each iteration -- straightforward
             # but O(distinct pairs) per merge; the payoff of where_dict is
             # in step 5's per-word work below, not in this selection step.)
@@ -708,16 +707,15 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             var max_freq = -1
             for item in stats.items():
                 if item.value > max_freq:
-                    var a = item.key >> ENCODE_SHIFT
-                    var b = item.key & ENCODE_MASK
-                    if a != SEP and b != SEP:
-                        max_freq = item.value
-                        best_pair = (a, b)
+                    max_freq = item.value
+                    best_pair = (
+                        item.key >> ENCODE_SHIFT,
+                        item.key & ENCODE_MASK,
+                    )
             if max_freq <= 0:
-                # No mergeable pairs remain -- every word has already
-                # been reduced to a single token, or all that's left
-                # involves SEP. Stop early even if vocab_size wasn't
-                # reached.
+                # No mergeable pairs remain -- every word has been reduced
+                # to a single token.  Stop early even if vocab_size
+                # wasn't reached.
                 break
 
             var a_id = best_pair[0]
@@ -729,8 +727,8 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
             # appended to during its own merge (created pairs always involve
             # the brand-new merged_id), so the snapshot length is stable.
             var snap = len(where_dict[best_key])
-            for wi in range(snap):
-                var iw = where_dict[best_key][wi]
+            for wi in range(snap):  # wi = word-loop index (into snapshot)
+                var iw = where_dict[best_key][wi]  # iw = index of word
                 var freq = word_freq[iw]
                 var start = word_offs[iw]
                 var n = word_len[iw]
@@ -757,7 +755,7 @@ struct BPETokenizer[PT: PreTokenizer = GPreTokenizer](
                             # will now be adjacent to merged_id instead.
                             var pk = (wt[w - 1] << ENCODE_SHIFT) | wt[i]
                             if pk in stats:
-                                var nv = stats[pk] - freq
+                                var nv = stats[pk] - freq  # nv = new count
                                 stats[pk] = nv if nv > 0 else 0
                         # (a_id, b_id) itself is destroyed -- this is the
                         # pair being merged away.
