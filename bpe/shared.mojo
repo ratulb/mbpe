@@ -1,4 +1,3 @@
-from std.format import Writer
 from std.memory import memcpy
 
 comptime IntArray = List[Int]
