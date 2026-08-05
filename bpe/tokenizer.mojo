@@ -103,6 +103,36 @@ comptime HEAP_MASK: Int = (1 << HEAP_SHIFT) - 1
 comptime SCAN_LIMIT: Int = 32
 
 
+# ---------------------------------------------------------------------------
+# HeapKey + heap-key pack/unpack helpers
+# ---------------------------------------------------------------------------
+
+
+@fieldwise_init
+struct HeapKey(ImplicitlyCopyable & RegisterPassable):
+    """A merge candidate: (rank, node-index).  `rank` is the merge priority
+    (lower = learned earlier = merged first); `node` is the left node index
+    of the adjacent pair in the word's linked list."""
+
+    var rank: Int
+    var node: Int
+
+
+@always_inline
+def _pack_heap_key(rank: Int, node: Int) -> Int:
+    """Pack (rank, node) for the max-heap so a pop yields the LOWEST rank
+    first, ties broken by lowest node index: rank << HEAP_SHIFT | node,
+    negated because BinaryHeap pops the maximum."""
+    return -(rank << HEAP_SHIFT | node)
+
+
+@always_inline
+def _unpack_heap_key(key: Int) -> HeapKey:
+    """Inverse of _pack_heap_key.  Consumes the raw (negated) popped value."""
+    var raw = -key
+    return HeapKey(raw >> HEAP_SHIFT, raw & HEAP_MASK)
+
+
 struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
     """Two-tier merge-lookup cache.
 
@@ -218,6 +248,48 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
         self.arena.bytes.reserve(off + len(raw))
         self.arena.bytes.extend(raw)
         self.arena.spans[id] = TokenSpan(off, len(raw))
+
+
+# ---------------------------------------------------------------------------
+# MergeScratch — raw scratch buffers shared by every heap-driven merge
+# within one encode_ordinary() call.  A plain register-passable data bundle
+# (no destructor): the buffers are freed explicitly via free().
+# ---------------------------------------------------------------------------
+
+
+@fieldwise_init
+struct MergeScratch(ImplicitlyCopyable & RegisterPassable):
+    var ids: UnsafePointer[Int, MutAnyOrigin]
+    var nxt: UnsafePointer[Int, MutAnyOrigin]
+    var prv: UnsafePointer[Int, MutAnyOrigin]
+    var alive: UnsafePointer[UInt8, MutAnyOrigin]
+    var cap: Int
+
+    def __init__(out self):
+        self.ids = alloc[Int](0)
+        self.nxt = alloc[Int](0)
+        self.prv = alloc[Int](0)
+        self.alive = alloc[UInt8](0)
+        self.cap = 0
+
+    @always_inline
+    def free(mut self):
+        """Free all four buffers, returning this scratch to its initial state."""
+        self.ids.free()
+        self.nxt.free()
+        self.prv.free()
+        self.alive.free()
+        self.cap = 0
+
+    def ensure_capacity(mut self, n: Int):
+        """Grow all four buffers together if n exceeds the current capacity."""
+        if n > self.cap:
+            self.free()
+            self.ids = alloc[Int](n)
+            self.nxt = alloc[Int](n)
+            self.prv = alloc[Int](n)
+            self.alive = alloc[UInt8](n)
+            self.cap = n
 
 
 # ---------------------------------------------------------------------------
@@ -777,6 +849,158 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
     #     enough that repeated O(n) scans would dominate.
     # ─────────────────────────────────────────────────────────────────────
 
+    @always_inline
+    def _copy_word_ids[origin: Origin](
+        self,
+        ptr: UnsafePointer[UInt8, origin],
+        n: Int,
+        dst: UnsafePointer[Int, MutAnyOrigin],
+    ):
+        """Copy n raw bytes at ptr into dst as base token IDs, respecting this
+        tokenizer's byte-mapping scheme (SEQUENTIAL vs SHUFFLED)."""
+        var btr = self.byte_to_rank.unsafe_ptr()
+        for i in range(n):
+            comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
+                dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
+            else:
+                dst[i] = btr[Int(ptr[i])]
+
+    @always_inline
+    def _merge_scan[origin: Origin](
+        self,
+        ptr: UnsafePointer[UInt8, origin],
+        n: Int,
+        dst: UnsafePointer[Int, MutAnyOrigin],
+    ) -> Int:
+        """Short words (n < SCAN_LIMIT): tight scan-based greedy merge.
+
+        O(n^2) is cheaper than heap bookkeeping at this size.  Writes the
+        final token IDs into dst and returns how many tokens were written.
+        """
+        self._copy_word_ids(ptr, n, dst)
+        var len = n
+        # Repeatedly find and apply the single lowest-rank mergeable pair
+        # anywhere in the word, one merge per outer-loop iteration, until
+        # no pair in lookup_table matches anymore. This full O(len) rescan
+        # per merge is the "O(n^2) is cheaper" tradeoff -- acceptable
+        # because `len` is small here by construction (n < SCAN_LIMIT).
+        while len >= 2:
+            var best_rank = -1
+            var best_a = -1
+            var best_b = -1
+            var best_m = -1
+            for i in range(len - 1):
+                var merged = self.lookup_table.get(dst[i], dst[i + 1])
+                if merged >= 0 and (best_rank < 0 or merged < best_rank):
+                    # Lower merged-id here means "learned earlier during
+                    # training" (ids are assigned in merge order starting
+                    # at 256), i.e. higher merge priority -- so tracking
+                    # the minimum directly gives the correct greedy choice.
+                    best_rank = merged
+                    best_a = dst[i]
+                    best_b = dst[i + 1]
+                    best_m = merged
+            if best_rank < 0:
+                # No pair anywhere in the word matches any known merge
+                # rule -- fully reduced, stop.
+                break
+            len = merge_inplace(dst, len, best_a, best_b, best_m)
+        return len
+
+    @always_inline
+    def _merge_heap[origin: Origin](
+        self,
+        ptr: UnsafePointer[UInt8, origin],
+        n: Int,
+        dst: UnsafePointer[Int, MutAnyOrigin],
+        mut scratch: MergeScratch,
+        mut heap: BinaryHeap[Int],
+    ) -> Int:
+        """Long words (n >= SCAN_LIMIT): O(N log N) heap-driven merge.
+
+        Each word is a linked list (prev/next arrays) over its token nodes.
+        A min-heap of candidates drives the greedy merge: pop the lowest-
+        rank pair, splice it in O(1), and re-push only the two pairs
+        touching the merge site.  Writes the surviving tokens into dst and
+        returns how many were written.
+        """
+        if n > scratch.cap:
+            # Current scratch buffers are too small for this word -- grow
+            # them (freeing the old, smaller ones first). Sized exactly to
+            # `n`, so this only reallocates when a strictly longer word
+            # than any seen so far arrives.
+            scratch.ensure_capacity(n)
+
+        self._copy_word_ids(ptr, n, scratch.ids)
+
+        # Initialize one linked-list node per input byte: token id, next/prev
+        # pointers forming a simple doubly linked chain 0 <-> 1 <-> ... <-> n-1,
+        # and mark every node alive.
+        for i in range(n):
+            scratch.nxt[i] = i + 1
+            scratch.prv[i] = i - 1
+            scratch.alive[i] = 1
+        scratch.nxt[n - 1] = -1
+
+        # Seed the heap with every initially mergeable pair.
+        for i in range(n - 1):
+            var r0 = self.lookup_table.get(scratch.ids[i], scratch.ids[i + 1])
+            if r0 >= 0:
+                heap.push(_pack_heap_key(r0, i))
+
+        # Greedy lowest-rank merge (lazy-validated heap): entries aren't
+        # removed from the heap when they become stale -- every popped entry
+        # is REVALIDATED against the current state before being trusted.
+        while len(heap) > 0:
+            var key = _unpack_heap_key(heap.pop())
+            var e = key.node
+            var rank = key.rank
+            if scratch.alive[e] == 0:
+                # Node e was already merged away by an earlier,
+                # higher-priority pop -- this entry is stale, skip.
+                continue
+            var j = scratch.nxt[e]
+            if j < 0:
+                # e has no right neighbor anymore -- nothing to merge with.
+                continue
+            # Revalidate: the pair may have changed since it was pushed.
+            if self.lookup_table.get(scratch.ids[e], scratch.ids[j]) != rank:
+                continue
+
+            # Merge: node e absorbs node j (e stays, j is spliced out).
+            scratch.ids[e] = rank
+            var k = scratch.nxt[j]
+            if k >= 0:
+                scratch.prv[k] = e
+            scratch.nxt[e] = k
+            scratch.alive[j] = 0
+
+            # Only the two pairs touching the merge site can change as a
+            # result of this merge (e's new pair with its left neighbor p,
+            # and e's new pair with its new right neighbor k).
+            var p = scratch.prv[e]
+            if p >= 0:
+                var rp = self.lookup_table.get(scratch.ids[p], scratch.ids[e])
+                if rp >= 0:
+                    heap.push(_pack_heap_key(rp, p))
+            if k >= 0:
+                var rk = self.lookup_table.get(scratch.ids[e], scratch.ids[k])
+                if rk >= 0:
+                    heap.push(_pack_heap_key(rk, e))
+
+        # Emit surviving nodes in order (node 0 is never consumed). Node 0
+        # always survives as a list head (it can only ever be the "e" side
+        # of a merge, absorbing neighbors, never the "j" side that gets
+        # removed) -- so walking forward from 0 via nxt visits every
+        # surviving node in final left-to-right order.
+        var count = 0
+        var cur = 0
+        while cur >= 0:
+            dst[count] = scratch.ids[cur]
+            count += 1
+            cur = scratch.nxt[cur]
+        return count
+
     def encode_ordinary[
         mut: Bool,
         //,
@@ -806,225 +1030,32 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         var total_bytes = 0
         for word in words:
             total_bytes += word.byte_length()
-        if total_bytes == 0:
-            return IntArray()
 
-        # ---- 3. Single allocation + per-word heap-driven merge -----------
-        # Each word is a linked list (prev/next arrays) over its token nodes.
-        # A min-heap of candidates drives the greedy merge: pop the lowest-
-        # rank pair, splice it in O(1), and re-push only the two pairs
-        # touching the merge site.  O(N log N) instead of the O(N^2) full-
-        # scan-per-merge of the original encoder.
-        #
-        # Heap keys pack (rank, position) into a single Int: rank << 24 | idx.
-        # BinaryHeap is a max-heap, so the key is negated — the popped key
-        # then yields the lowest rank, breaking ties by lowest position
-        # (identical to the scan-based selection order).
-        #
-        # All scratch buffers are raw allocations reused across words; the
-        # BinaryHeap retains its capacity between words, so steady-state
-        # encoding does zero allocation.
-        var result = IntArray()
-        result.resize(total_bytes, 0)
+        # ---- 3. Single allocation + per-word strategy dispatch -----------
+        # Scratch buffers (MergeScratch) and the BinaryHeap are shared by
+        # every long word in this call and reallocated only when a longer
+        # word than previously seen shows up, so steady-state encoding does
+        # zero allocation.
+        var result = IntArray(unsafe_uninit_length=total_bytes)
         var write_pos = 0
-        # Scratch buffers for the heap-driven (long-word) path only,
-        # reused across every long word in this call -- reallocated only
-        # when a longer word than previously seen shows up (see `cap`
-        # below), so most words hit these buffers "for free".
-        var ids_buf = alloc[Int](
-            0
-        )  # node index -> current token id (updates in place as nodes merge)
-        var nxt_buf = alloc[Int](
-            0
-        )  # node index -> next node index in the linked list (-1 = end)
-        var prv_buf = alloc[Int](
-            0
-        )  # node index -> previous node index in the linked list (-1 = start)
-        var alive_buf = alloc[UInt8](
-            0
-        )  # node index -> 1 if this node is still part of the list, 0 if merged away
-        var cap = 0  # current allocated capacity of the four buffers above
+        var scratch = MergeScratch()
         var heap = BinaryHeap[Int]()
-        var btr = self.byte_to_rank.unsafe_ptr()
         for word in words:
             var ptr = word.unsafe_ptr()
             var n = word.byte_length()
             var dst = result.unsafe_ptr() + write_pos
 
-            # Copy bytes as Ints (via PT byte mapping)
-            # Trivial case: 0 or 1 byte can't have any adjacent pair to
-            # merge, so just copy the base token ID(s) straight through.
             if n < 2:
-                for i in range(n):
-                    comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
-                        dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
-                    else:
-                        dst[i] = btr[Int(ptr[i])]
+                # Trivial case: 0 or 1 byte can't have any adjacent pair to
+                # merge, so just copy the base token ID(s) straight through.
+                self._copy_word_ids(ptr, n, dst)
                 write_pos += n
-                continue
+            elif n < SCAN_LIMIT:
+                write_pos += self._merge_scan(ptr, n, dst)
+            else:
+                write_pos += self._merge_heap(ptr, n, dst, scratch, heap)
 
-            # Short words: tight scan-based greedy merge (O(n^2) is cheaper
-            # than heap bookkeeping at this size).
-            if n < SCAN_LIMIT:
-                for i in range(n):
-                    comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
-                        dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
-                    else:
-                        dst[i] = btr[Int(ptr[i])]
-                var len = n
-                # Repeatedly find and apply the single lowest-rank
-                # mergeable pair anywhere in the word, one merge per
-                # outer-loop iteration, until no pair in lookup_table
-                # matches anymore. This full O(len) rescan per merge is
-                # the "O(n^2) is cheaper" tradeoff mentioned above --
-                # acceptable because `len` is small here by construction
-                # (n < SCAN_LIMIT).
-                while len >= 2:
-                    var best_rank = -1
-                    var best_a = -1
-                    var best_b = -1
-                    var best_m = -1
-                    for i in range(len - 1):
-                        var merged = self.lookup_table.get(dst[i], dst[i + 1])
-                        if merged >= 0 and (
-                            best_rank < 0 or merged < best_rank
-                        ):
-                            # Lower merged-id here means "learned earlier
-                            # during training" (ids are assigned in merge
-                            # order starting at 256), i.e. higher merge
-                            # priority -- so tracking the minimum directly
-                            # gives the correct greedy choice.
-                            best_rank = merged
-                            best_a = dst[i]
-                            best_b = dst[i + 1]
-                            best_m = merged
-                    if best_rank < 0:
-                        # No pair anywhere in the word matches any known
-                        # merge rule -- fully reduced, stop.
-                        break
-                    len = merge_inplace(dst, len, best_a, best_b, best_m)
-                write_pos += len
-                continue
-
-            # Long words: heap-driven merge (O(N log N)).
-            if n > cap:
-                # Current scratch buffers are too small for this word --
-                # grow them (freeing the old, smaller ones first). Sized
-                # exactly to `n` rather than some padded amount, so this
-                # only reallocates when a strictly longer word than any
-                # seen so far arrives.
-                ids_buf.free()
-                nxt_buf.free()
-                prv_buf.free()
-                alive_buf.free()
-                ids_buf = alloc[Int](n)
-                nxt_buf = alloc[Int](n)
-                prv_buf = alloc[Int](n)
-                alive_buf = alloc[UInt8](n)
-                cap = n
-
-            # Initialize one linked-list node per input byte: token id,
-            # next/prev pointers forming a simple doubly linked chain
-            # 0 <-> 1 <-> 2 <-> ... <-> n-1, and mark every node alive.
-            for i in range(n):
-                comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
-                    ids_buf[i] = Self.PT.byte_to_id(Int(ptr[i]))
-                else:
-                    ids_buf[i] = btr[Int(ptr[i])]
-                nxt_buf[i] = i + 1
-                prv_buf[i] = i - 1
-                alive_buf[i] = 1
-            nxt_buf[n - 1] = -1
-
-            # Seed the heap with every initially mergeable pair.
-            # Each heap entry packs (rank, left-node-index) into one Int
-            # via `rank << HEAP_SHIFT | i`, then negates it -- since
-            # BinaryHeap is a max-heap, pushing the negated key means the
-            # eventual max-heap pop returns the numerically LOWEST rank
-            # first (lowest rank = learned earliest = correct greedy
-            # priority), with ties broken by lowest node index (since a
-            # smaller `i` makes the packed value more negative / "more
-            # max" after negation, matching the left-to-right tie-break
-            # used by the scan-based short-word path above).
-            for i in range(n - 1):
-                var r0 = self.lookup_table.get(ids_buf[i], ids_buf[i + 1])
-                if r0 >= 0:
-                    heap.push(-(r0 << HEAP_SHIFT | i))
-
-            # Greedy lowest-rank merge (lazy-validated heap).
-            #
-            # "Lazy" because entries aren't removed from the heap when
-            # they become stale (e.g. one of their two nodes got merged
-            # into something else by an earlier pop) -- instead, every
-            # popped entry is REVALIDATED against the current state
-            # before being trusted, and simply skipped if it's no longer
-            # accurate. This avoids the cost of an indexed/decrease-key
-            # heap at the price of some extra (harmless) stale pops.
-            while len(heap) > 0:
-                var key = -heap.pop()  # undo the negation from push
-                var e = key & HEAP_MASK  # recover the left-node index
-                var rank = key >> HEAP_SHIFT  # recover the rank
-                if alive_buf[e] == 0:
-                    # Node e was already merged away by an earlier,
-                    # higher-priority pop -- this entry is stale, skip.
-                    continue
-                var j = nxt_buf[e]
-                if j < 0:
-                    # e has no right neighbor anymore (e.g. it was at the
-                    # end, or its old neighbor already merged elsewhere)
-                    # -- nothing to merge with, skip.
-                    continue
-                # Revalidate: the pair may have changed since it was pushed.
-                # (e.g. j itself might have merged with something to its
-                # right already, changing what e's current right-neighbor
-                # pair actually is)
-                if self.lookup_table.get(ids_buf[e], ids_buf[j]) != rank:
-                    continue
-
-                # Merge: node e absorbs node j (e stays, j is spliced out).
-                # e's token id becomes the merged id; j is marked dead and
-                # unlinked from the list (e's next now skips past j to
-                # whatever came after j).
-                ids_buf[e] = rank
-                var k = nxt_buf[j]
-                if k >= 0:
-                    prv_buf[k] = e
-                nxt_buf[e] = k
-                alive_buf[j] = 0
-
-                # Only the two pairs touching the merge site can change
-                # as a result of this merge (e's new pair with its
-                # left neighbor p, and e's new pair with its new right
-                # neighbor k) -- every other pair in the word is
-                # unaffected, so only these two get freshly pushed.
-                var p = prv_buf[e]
-                if p >= 0:
-                    var rp = self.lookup_table.get(ids_buf[p], ids_buf[e])
-                    if rp >= 0:
-                        heap.push(-(rp << HEAP_SHIFT | p))
-                if k >= 0:
-                    var rk = self.lookup_table.get(ids_buf[e], ids_buf[k])
-                    if rk >= 0:
-                        heap.push(-(rk << HEAP_SHIFT | e))
-
-            # Emit surviving nodes in order (node 0 is never consumed).
-            # Node 0 always survives as a list head (it can only ever be
-            # the "e" side of a merge, absorbing neighbors, never the "j"
-            # side that gets removed) -- so walking forward from 0 via
-            # nxt_buf visits every surviving node in final left-to-right
-            # order.
-            var count = 0
-            var cur = 0
-            while cur >= 0:
-                dst[count] = ids_buf[cur]
-                count += 1
-                cur = nxt_buf[cur]
-            write_pos += count
-
-        ids_buf.free()
-        nxt_buf.free()
-        prv_buf.free()
-        alive_buf.free()
+        scratch.free()
 
         # Trim to actual used size (write_pos is usually less than the
         # total_bytes upper bound allocated earlier, since merging
