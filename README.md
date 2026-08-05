@@ -75,7 +75,7 @@ print(tokenizer.n_vocab)                          # 200019
 tokenizer = mbpe.GPT2Tokenizer()
 corpus = ["the cat sat on the mat", "the dog sat on the log"]
 tokenizer.train(corpus, vocab_size=300)
-print(tokenizer.encode("the cat sat"))            # [259, 270, 265]
+print(tokenizer.encode("the cat sat"))            # [258, 269, 263]
 tokenizer.save_tiktoken("my_tokenizer.tiktoken")
 
 # Or train with a GPT-4-style `PreTokenizer`
@@ -138,13 +138,13 @@ print(tokenizer.encode("<|im_start|> hello"))     # [50257, 23748]
 BPETokenizer[PT] / Tokenizers.get[PT] → returns comptime parameterized tokenizer. Loads from `.tiktoken` files located via `MBPE_DATA_DIR` env var, falling back to `./data/`
 
 ```mojo
-
 from bpe.tokenizer import Tokenizers
 
-var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
-var ids = gpt2.encode("hello world")
-print(gpt2.decode(ids))
 
+def main() raises:
+    var gpt2 = Tokenizers.get[Tokenizers.gpt2]()
+    var ids = gpt2.encode("hello world")
+    print(gpt2.decode(ids))
 ```
 #### Train:
 
@@ -152,8 +152,12 @@ print(gpt2.decode(ids))
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import GPT2Pretokenizer
 
-var tok = BPETokenizer[GPT2Pretokenizer]()
-tok.train((["hello world"]), 300)
+
+def main() raises:
+    var tok = BPETokenizer[GPT2Pretokenizer]()
+    var corpus = List[String]()
+    corpus.append("hello world")
+    tok.train(corpus, 300)
 ```
 
 
@@ -169,36 +173,36 @@ tok.train((["hello world"]), 300)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **12.5** | **158.8** |
-| mbpe — Python bindings | 1.54M | 10.6 | 78.4 |
-| tiktoken (Python) | 1.54M | 4.8 | 37.2 |
-| tiktoken-rs | 1.53M | 4.2 | 65.9 |
+| **mbpe — Mojo native** | 1.54M | **12.3** | **139.2** |
+| mbpe — Python bindings | 1.54M | 10.8 | 82.0 |
+| tiktoken (Python) | 1.54M | 4.8 | 38.1 |
+| tiktoken-rs | 1.53M | 4.3 | 67.0 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **10.0** | **157.2** |
-| mbpe — Python bindings | 1.28M | 9.1 | 72.2 |
-| tiktoken (Python) | 1.28M | 3.9 | 32.1 |
-| tiktoken-rs | 1.28M | 4.0 | 65.2 |
+| **mbpe — Mojo native** | 1.28M | **9.5** | **146.6** |
+| mbpe — Python bindings | 1.28M | 8.8 | 73.3 |
+| tiktoken (Python) | 1.28M | 3.9 | 32.3 |
+| tiktoken-rs | 1.28M | 3.9 | 68.4 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **7.8** | **153.9** |
-| mbpe — Python bindings | 1.28M | 6.8 | 74.0 |
-| tiktoken (Python) | 1.28M | 6.2 | 39.2 |
-| tiktoken-rs | 1.28M | 7.0 | 67.8 |
+| **mbpe — Mojo native** | 1.28M | **8.1** | **151.4** |
+| mbpe — Python bindings | 1.28M | 7.1 | 71.1 |
+| tiktoken (Python) | 1.28M | 6.2 | 39.9 |
+| tiktoken-rs | 1.28M | 6.9 | 66.7 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 41 ms | 46 ms | 54 ms | 75 ms |
-| Merges/s | 5811 | 15946 | 31933 | 49684 |
-| Encode (M tok/s) | 21.0 | 16.7 | 13.6 | 12.0 |
+| Train time | 44 ms | 44 ms | 54 ms | 74 ms |
+| Merges/s | 5466 | 16741 | 32262 | 49986 |
+| Encode (M tok/s) | 20.2 | 16.5 | 13.3 | 11.6 |
 
 *Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
@@ -271,10 +275,10 @@ pixi install
 pixi run mojo build python-binding/mbpe.mojo -I . \
   --emit shared-lib -o python-binding/mbpe/_mbpe.so
 
-# Run Mojo tests (78 total)
-# pixi run mojo main.mojo            # 36 tests
-# pixi run mojo -I . tests/test_tokenizer.mojo           # 9 tests
-# pixi run mojo -I . tests/exhaustive_tokenizer.mojo     # 33 tests
+# Run Mojo tests (77 total)
+# pixi run mojo main.mojo            # 33 tests
+# pixi run mojo -I . tests/test_tokenizer.mojo           # 10 tests
+# pixi run mojo -I . tests/exhaustive_tokenizer.mojo     # 34 tests
 
 # Run Python tests
 # pixi run --environment dev python -m pytest tests/python/ -v
