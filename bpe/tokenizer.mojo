@@ -1064,6 +1064,30 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         result.resize(write_pos, 0)
         return result^
 
+    def pretokenize[
+        mut: Bool,
+        //,
+        origin: Origin[mut=mut],
+    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
+        """Split `text` into pre-tokenized word views (zero-copy).
+
+        Exposes the pre-tokenizer's word boundaries directly — the exact
+        same split that encode() / encode_ordinary() feed into the BPE
+        merge stage.  Returns views into `text`, so the result is only
+        valid for the lifetime of `text`.
+
+        Accepts StringSlice (any string view) so callers can pass any
+        string-like value without owning a String.
+
+        Args:
+            text: The text to split.
+
+        Returns:
+            One StringSlice view per pre-tokenized word. Empty input
+            yields an empty list.
+        """
+        return self.pt.split_view(text)
+
     def encode[
         mut: Bool,
         //,

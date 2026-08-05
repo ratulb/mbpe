@@ -5,6 +5,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "python-binding"))
 import mbpe
 
+import parity_helpers as ph
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
 TOKENIZER_CLASSES = {
@@ -28,6 +30,23 @@ ALL_VARIANTS = ["gpt2", "gpt4", "gpt4o"]
 @pytest.fixture(params=ALL_VARIANTS)
 def tokenizer_type(request):
     return request.param
+
+
+@pytest.fixture(scope="session", params=ph.ENCODING_PAIRS)
+def encoding_pair(request):
+    """Yield (tok_mbpe, tok_tk, mbpe_name, tiktoken_name).
+
+    Session-scoped: loading the encodings means parsing a 100k+ line
+    .tiktoken file (~1-2s each), and the parity suites never mutate the
+    tokenizers, so load each encoding once and share it.
+    """
+    mbpe_name, tiktoken_name = request.param
+    return (
+        mbpe.get_encoding(mbpe_name),
+        ph.get_tiktoken().get_encoding(tiktoken_name),
+        mbpe_name,
+        tiktoken_name,
+    )
 
 
 @pytest.fixture

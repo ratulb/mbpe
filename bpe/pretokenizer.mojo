@@ -108,6 +108,14 @@ FILE STRUCTURE
 
 from std.bit import pop_count
 from std.memory import memcmp
+from bpe.unicode_tables import (
+    is_letter,
+    is_digit,
+    is_letter_or_digit,
+    is_upper_like,
+    is_lower_like,
+    is_whitespace,
+)
 
 
 @always_inline
@@ -169,239 +177,10 @@ def decode_codepoint[
     )
 
 
-@always_inline
-def is_letter(cp: Int) -> Bool:
-    """Return True if cp is a Unicode letter (like \\p{L} in regex)."""
-    if cp < 128:
-        return (65 <= cp <= 90) or (97 <= cp <= 122)
-    return (
-        (0x00AA <= cp and cp <= 0x00AA)
-        or (0x00B5 <= cp and cp <= 0x00B5)
-        or (0x00BA <= cp and cp <= 0x00BA)
-        or (0x00C0 <= cp and cp <= 0x00D6)
-        or (0x00D8 <= cp and cp <= 0x00F6)
-        or (0x00F8 <= cp and cp <= 0x024F)
-        or (0x0250 <= cp and cp <= 0x02AF)
-        or (0x0300 <= cp and cp <= 0x036F)
-        or (0x1E00 <= cp and cp <= 0x1EFF)
-        or (0x0400 <= cp and cp <= 0x04FF)
-        or (0x0500 <= cp and cp <= 0x052F)
-        or (0x0370 <= cp and cp <= 0x03FF)
-        or (0x1F00 <= cp and cp <= 0x1FFF)
-        or (0x2E80 <= cp and cp <= 0x2EFF)
-        or (0x2F00 <= cp and cp <= 0x2FDF)
-        or (0x3000 <= cp and cp <= 0x303F)
-        or (0x3040 <= cp and cp <= 0x309F)
-        or (0x30A0 <= cp and cp <= 0x30FF)
-        or (0x3100 <= cp and cp <= 0x312F)
-        or (0x3130 <= cp and cp <= 0x318F)
-        or (0x3200 <= cp and cp <= 0x32FF)
-        or (0x3300 <= cp and cp <= 0x33FF)
-        or (0x3400 <= cp and cp <= 0x4DBF)
-        or (0x4E00 <= cp and cp <= 0x9FFF)
-        or (0xA000 <= cp and cp <= 0xA4CF)
-        or (0xAC00 <= cp and cp <= 0xD7AF)
-        or (0xF900 <= cp and cp <= 0xFAFF)
-        or (0xFE30 <= cp and cp <= 0xFE4F)
-        or (0xFF21 <= cp and cp <= 0xFF3A)
-        or (0xFF41 <= cp and cp <= 0xFF5A)
-        or (0x0600 <= cp and cp <= 0x06FF)
-        or (0x0750 <= cp and cp <= 0x077F)
-        or (0x08A0 <= cp and cp <= 0x08FF)
-        or (0x0590 <= cp and cp <= 0x05FF)
-        or (0x0900 <= cp and cp <= 0x097F)
-        or (0x0980 <= cp and cp <= 0x09FF)
-        or (0x0E00 <= cp and cp <= 0x0E7F)
-    )
-
-
-@always_inline
-def is_digit(cp: Int) -> Bool:
-    """Return True if cp is a Unicode digit (like \\p{N} in regex)."""
-    if cp < 128:
-        return 48 <= cp <= 57
-    return (
-        (0x0030 <= cp and cp <= 0x0039)
-        or (0x0660 <= cp and cp <= 0x0669)
-        or (0x06F0 <= cp and cp <= 0x06F9)
-        or (0x0966 <= cp and cp <= 0x096F)
-        or (0x09E6 <= cp and cp <= 0x09EF)
-        or (0x0AE6 <= cp and cp <= 0x0AEF)
-        or (0x0B66 <= cp and cp <= 0x0B6F)
-        or (0x0BE6 <= cp and cp <= 0x0BEF)
-        or (0x0C66 <= cp and cp <= 0x0C6F)
-        or (0x0CE6 <= cp and cp <= 0x0CEF)
-        or (0x0D66 <= cp and cp <= 0x0D6F)
-        or (0x0E50 <= cp and cp <= 0x0E59)
-        or (0x0ED0 <= cp and cp <= 0x0ED9)
-        or (0x0F20 <= cp and cp <= 0x0F29)
-    )
-
-
-@always_inline
-def is_letter_or_digit(cp: Int) -> Bool:
-    """Return True if cp is a letter or digit.
-
-    Equivalent to is_letter(cp) or is_digit(cp).
-    Used in character classes like [^...\\p{L}\\p{N}] in the regex patterns.
-    """
-    return is_letter(cp) or is_digit(cp)
-
-
-@always_inline
-def is_lowercase(cp: Int) -> Bool:
-    """Return True if cp is a Unicode lowercase letter (like \\p{Ll} in regex).
-    """
-    if cp < 128:
-        return 97 <= cp <= 122
-    # Latin-1 Supplement lowercase
-    if 0x00AA == cp or 0x00B5 == cp or 0x00BA == cp:
-        return True
-    if 0x00DF <= cp <= 0x00F6:
-        return True
-    if 0x00F8 <= cp <= 0x00FF:
-        return True
-    # Latin Extended: odd codepoints = lowercase, even = uppercase
-    if 0x0100 <= cp <= 0x024F:
-        return (cp & 1) == 1
-    # IPA Extensions (all Ll)
-    if 0x0250 <= cp <= 0x02AF:
-        return True
-    # Greek: 0x03B1-0x03C9 alpha-omega lowercase, 0x03CE, 0x03D0-0x03E1, etc.
-    if 0x03B1 <= cp <= 0x03C9:
-        return True
-    if cp == 0x03CE:
-        return True
-    # Cyrillic lowercase: 0x0430-0x044F + extended
-    if 0x0430 <= cp <= 0x044F:
-        return True
-    if 0x0450 <= cp <= 0x04FF and ((cp - 0x0450) % 2 == 0 or cp == 0x0450):
-        return True
-    # Latin Extended Additional: odd = lowercase
-    if 0x1E00 <= cp <= 0x1EFF:
-        return (cp & 1) == 1
-    # Greek Extended: 0x1F00-0x1FFF — many lowercase forms
-    if 0x1F00 <= cp <= 0x1FFF:
-        return True
-    # Fullwidth a-z
-    if 0xFF41 <= cp <= 0xFF5A:
-        return True
-    return False
-
-
-@always_inline
-def is_mark(cp: Int) -> Bool:
-    """Return True if cp is a combining mark (like \\p{M} in regex)."""
-    if cp < 128:
-        return False
-    return (
-        (0x0300 <= cp and cp <= 0x036F)  # Combining Diacritical Marks
-        or (0x0483 <= cp and cp <= 0x0489)  # Cyrillic
-        or (0x0591 <= cp and cp <= 0x05BD)  # Hebrew
-        or cp == 0x05BF
-        or cp == 0x05C1
-        or cp == 0x05C2
-        or cp == 0x05C4
-        or cp == 0x05C5
-        or cp == 0x05C7
-        or (0x0610 <= cp and cp <= 0x061A)  # Arabic
-        or (0x064B <= cp and cp <= 0x065F)
-        or cp == 0x0670
-        or (0x06D6 <= cp and cp <= 0x06DC)
-        or (0x06DF <= cp and cp <= 0x06E4)
-        or (0x06E7 <= cp and cp <= 0x06E8)
-        or (0x06EA <= cp and cp <= 0x06ED)
-        or (0x0711 <= cp and cp <= 0x074A)  # Syriac
-        or (0x0901 <= cp and cp <= 0x0903)  # Devanagari
-        or cp == 0x093C
-        or (0x093E <= cp and cp <= 0x094D)
-        or (0x0951 <= cp and cp <= 0x0954)
-        or (0x0962 <= cp and cp <= 0x0963)
-        or (0x0981 <= cp and cp <= 0x0983)  # Bengali
-        or cp == 0x09BC
-        or (0x09BE <= cp and cp <= 0x09C4)
-        or cp == 0x09C7
-        or cp == 0x09C8
-        or (0x09CB <= cp and cp <= 0x09CD)
-        or cp == 0x09D7
-        or (0x09E2 <= cp and cp <= 0x09E3)
-        or (0x0E31 <= cp and cp <= 0x0E3A)  # Thai
-        or (0x0E47 <= cp and cp <= 0x0E4E)
-        or (0x0F71 <= cp and cp <= 0x0F84)  # Tibetan
-        or (0x0F86 <= cp and cp <= 0x0F87)
-        or (0x0F90 <= cp and cp <= 0x0FBC)
-        or (0x102B <= cp and cp <= 0x103E)  # Myanmar
-        or (0x17B6 <= cp and cp <= 0x17D3)  # Khmer
-        or (
-            0x1DC0 <= cp and cp <= 0x1DFF
-        )  # Combining Diacritical Marks Supplement
-        or (0x20D0 <= cp and cp <= 0x20F0)  # Combining Marks for Symbols
-        or (0xFE00 <= cp and cp <= 0xFE0F)  # Variation Selectors
-        or (0xFE20 <= cp and cp <= 0xFE2F)  # Combining Half Marks
-        or cp == 0x200C
-        or cp == 0x200D  # ZWJ/ZWNJ
-    )
-
-
-@always_inline
-def is_upper_like(cp: Int) -> Bool:
-    """Like \\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M} for o200k (not-Ll letters + marks).
-
-    Note: \\p{N} (digits) are excluded because o200k's alt 1/2 letter
-    patterns don't include the \\p{N} category.  The ``is_letter`` helper
-    includes digit codepoints that happen to share a Unicode block with
-    letters (e.g. Thai 0x0E50-0x0E59), so we must explicitly prune them.
-    """
-    if cp < 128:
-        return 65 <= cp <= 90
-    return (
-        is_letter(cp) and not is_lowercase(cp) and not is_digit(cp)
-    ) or is_mark(cp)
-
-
-@always_inline
-def is_lower_like(cp: Int) -> Bool:
-    """Like \\p{Ll}\\p{Lm}\\p{Lo}\\p{M} for o200k (Ll + other letters + marks).
-
-    Same digit-exclusion rationale as ``is_upper_like``.
-    """
-    if cp < 128:
-        return (65 <= cp <= 90) or (97 <= cp <= 122)
-    return (is_letter(cp) and not is_digit(cp)) or is_mark(cp)
-
-
-@always_inline
-def is_whitespace(cp: Int) -> Bool:
-    """Return True if cp is a Unicode whitespace codepoint."""
-    if cp < 128:
-        return cp == 0x0009 or cp == 0x000A or cp == 0x000D or cp == 0x0020
-    return (
-        cp == 0x0009
-        or cp == 0x000A
-        or cp == 0x000B
-        or cp == 0x000C
-        or cp == 0x000D
-        or cp == 0x0020
-        or cp == 0x0085
-        or cp == 0x00A0
-        or cp == 0x1680
-        or cp == 0x2000
-        or cp == 0x2001
-        or cp == 0x2002
-        or cp == 0x2003
-        or cp == 0x2004
-        or cp == 0x2005
-        or cp == 0x2006
-        or cp == 0x2007
-        or cp == 0x2008
-        or cp == 0x2009
-        or cp == 0x200A
-        or cp == 0x2028
-        or cp == 0x2029
-        or cp == 0x202F
-        or cp == 0x205F
-        or cp == 0x3000
-    )
+# Unicode class predicates (is_letter, is_digit, is_letter_or_digit,
+# is_upper_like, is_lower_like, is_whitespace) now live in bpe/unicode_tables.mojo
+# (generated, event-point binary search over an InlineArray) and are
+# re-exported via the import above.
 
 
 # ── ASCII byte-class LUT ─────────────────────────────────────────────────
@@ -465,9 +244,22 @@ def _hasless(x: UInt64, n: UInt64) -> UInt64:
 
 
 @always_inline
+def _haszero(x: UInt64) -> UInt64:
+    return (
+        (x - UInt64(0x0101010101010101)) & ~x & UInt64(0x8080808080808080)
+    )
+
+
+@always_inline
 def _letters8(x: UInt64) -> UInt64:
     var l = x | UInt64(0x2020202020202020)
     var below_z = _hasless(l, UInt64(0x7B))
+    # _hasless mis-detects a byte EXACTLY equal to its bound n (here 0x7B,
+    # i.e. '{') when a lower byte < n borrows into it during the per-byte
+    # subtraction.  Kill that byte with an exact-equality mask so '{' is
+    # never classified as a letter.
+    var is_0x7B = _haszero(l ^ (UInt64(0x7B) * UInt64(0x0101010101010101)))
+    below_z = below_z & ~is_0x7B
     var below_a = _hasless(l, UInt64(0x61))
     return below_z & ~below_a
 
@@ -523,18 +315,34 @@ def is_ascii_ws_byte(b: Int) -> Bool:
     Matches: \\t (0x09), \\n (0x0A), \\v (0x0B), \\f (0x0C),
     \\r (0x0D), space (0x20).
 
-    This is the byte-level version of \\s from the regex patterns.
-    We use byte checks (not codepoint checks) because:
-      - GPT-2/GPT-4 regex \\s matches ONLY ASCII whitespace bytes
-      - The match_ws_* and _match_newline matchers operate on raw
-        bytes, not decoded codepoints
-      - Byte-level comparisons are faster and avoid UTF-8 decoding
-        overhead
-
-    This helper exists because the same ASCII-whitespace check is used
-    by multiple matchers in both GPT2Pretokenizer and GPT4Pretokenizer.
+    This is the byte-level fast path for \\s: the regex patterns match
+    full Unicode whitespace, so non-ASCII codepoints are decoded and
+    checked with is_whitespace() via is_ws_at().
     """
     return (Int(BYTE_CLASS[b]) & BC_WS) != 0
+
+
+@always_inline
+def is_ws_at[
+    origin: Origin, //
+](span: Span[UInt8, origin], pos: Int) -> Int:
+    """Return the UTF-8 byte length of the codepoint at ``pos`` if it is
+    Unicode whitespace (matching \\s in the regex patterns), else 0.
+
+    This is the codepoint-level whitespace test used by the ws matchers.
+    The regex \\s class is Unicode White_Space (see is_whitespace), so
+    non-ASCII ws codepoints such as U+00A0 (2 bytes) or U+3000 (3 bytes)
+    must be decoded before the check.
+    """
+    var lead = span[pos]
+    if lead < 0x80:
+        if is_ascii_ws_byte(Int(lead)):
+            return 1
+        return 0
+    var cplen = utf8_byte_length(lead)
+    if is_whitespace(decode_codepoint(span.unsafe_ptr() + pos, cplen)):
+        return cplen
+    return 0
 
 
 # ===========================================================================
@@ -1451,82 +1259,65 @@ trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
     ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match alternative 5: \\s++$.
 
-        Matches if ALL remaining bytes from pos to end-of-string are
-        ASCII whitespace.  Returns the match length (entire remaining
-        span) or 0 if any non-whitespace byte follows.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
+        Matches if ALL remaining codepoints from pos to end-of-string are
+        Unicode whitespace.  Returns the match length in bytes (entire
+        remaining span) or 0 if any non-whitespace codepoint follows.
         """
         var n = len(span)
         var i = pos
         var count = 0
         while i < n:
-            if not is_ascii_ws_byte(Int(span[i])):
+            var l = is_ws_at(span, i)
+            if l == 0:
                 return 0
-            count += 1
-            i += 1
+            count += l
+            i += l
         return count
 
     @staticmethod
     def match_ws_not_before_nonws[
         origin: Origin, //
     ](span: Span[UInt8, origin], pos: Int) -> Int:
-        """Match whitespace run where the byte AFTER is also whitespace (or EOS).
+        """Match alternative: \\s+(?!\\S).
 
-        Approximates the regex negative lookahead (?!\\S).  Scans the
-        full ASCII-whitespace run, then shrinks from the right until
-        the post-match byte IS whitespace or end-of-string.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
+        The regex \\s+(?!\\S) greedily consumes the maximal codepoint-level
+        Unicode whitespace run, then backtracks one codepoint if a
+        non-whitespace character follows (so the post-match char is ws or
+        EOS and the negative lookahead holds).  Returns the match length
+        in bytes, or 0 if no ws is present at pos.
         """
         var n = len(span)
         if pos >= n:
             return 0
-        if not is_ascii_ws_byte(Int(span[pos])):
+        if is_ws_at(span, pos) == 0:
             return 0
         var end = pos
-        while end < n and is_ascii_ws_byte(Int(span[end])):
-            end += 1
-        var total = end - pos
-        var ws_len = total
-        while ws_len >= 1:
-            var next_pos = pos + ws_len
-            if next_pos >= n or is_ascii_ws_byte(Int(span[next_pos])):
-                return ws_len
-            ws_len -= 1
-        return 0
+        var total = 0
+        var last_cp_len = 0
+        while end < n:
+            var l = is_ws_at(span, end)
+            if l == 0:
+                break
+            last_cp_len = l
+            total += l
+            end += l
+        if end < n:
+            return total - last_cp_len
+        return total
 
     @staticmethod
     def match_single_ws[
         origin: Origin, //
     ](span: Span[UInt8, origin], pos: Int) -> Int:
-        """Match a single ASCII whitespace byte.
+        """Match alternative: \\s (single whitespace codepoint).
 
-        Catch-all fallback for whitespace bytes not matched by the
-        trailing-ws or ws-before-nonws alternatives.
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            1 if whitespace, 0 otherwise.
+        Catch-all fallback for whitespace not matched by the trailing-ws
+        or ws-before-nonws alternatives.  Returns the byte length of the
+        whitespace codepoint, or 0 if pos is not whitespace.
         """
         if pos >= len(span):
             return 0
-        if is_ascii_ws_byte(Int(span[pos])):
-            return 1
-        return 0
+        return is_ws_at(span, pos)
 
 
 # ===========================================================================
@@ -2127,45 +1918,36 @@ struct GPT4Pretokenizer[
     ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match alternative 6: \\s*[\\r\\n].
 
-        Matches optional leading ASCII whitespace then exactly one CR
+        Matches optional leading Unicode whitespace then exactly one CR
         or LF as the last character.  Implements \\s*[\\r\\n] where:
-          - \\s* is greedy (consumes all ASCII whitespace)
+          - \\s* is greedy (consumes all Unicode whitespace)
           - [\\r\\n] must be the final character
 
-        Algorithm:
-          1. Scan the full ASCII-ws run starting at pos
-          2. Shrink from the right until the last byte is CR or LF
-          3. If found, return that length; if no CR/LF after shrinking
-             below 1, return 0
+        The greedy engine backtracks \\s* until [\\r\\n] matches: the
+        match ends right after the rightmost CR or LF codepoint inside
+        the maximal whitespace run.
 
         Examples:
-          "\\n"     -> "\\n"
-          " \\n"    -> " \\n"
-          "  \\r\\n" -> "  \\r"  (only one CR/LF captured)
-
-        Args:
-            span: The full UTF-8 byte span of the input text.
-            pos: Current position in the span.
-
-        Returns:
-            Number of bytes matched, or 0 if no match.
+          "\\n"      -> "\\n"
+          " \\n"     -> " \\n"
+          "  \\r\\n"  -> "  \\r\\n"   (last char \\n is CR/LF)
+          "  \\r\\n\\u00a0" -> "  \\r\\n"  (\\s* backtracks past \\u00a0)
         """
         var n = len(span)
         if pos >= n:
             return 0
-        var end = pos
-        while end < n and is_ascii_ws_byte(Int(span[end])):
-            end += 1
-        var total = end - pos
-        if total == 0:
+        var i = pos
+        var last_crlf_end = -1
+        while i < n:
+            var l = is_ws_at(span, i)
+            if l == 0:
+                break
+            if span[i] == UInt8(10) or span[i] == UInt8(13):
+                last_crlf_end = i + 1
+            i += l
+        if last_crlf_end < 0:
             return 0
-        var ws_len = total
-        while ws_len >= 1:
-            var last_b = Int(span[pos + ws_len - 1])
-            if last_b == 10 or last_b == 13:
-                return ws_len
-            ws_len -= 1
-        return 0
+        return last_crlf_end - pos
 
     # ── o200k_base matchers ──────────────────────────────────────────────
     # tiktoken's o200k_base uses a different pre-tokenizer pattern from
@@ -2190,6 +1972,135 @@ struct GPT4Pretokenizer[
 
     @staticmethod
     @always_inline
+    def _lower_len_at[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
+        """Byte length of the codepoint at pos if it is in
+        [\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}], else 0."""
+        var b = span[pos]
+        if b < 0x80:
+            var ib = Int(b)
+            if 97 <= ib <= 122:
+                return 1
+            return 0
+        var cplen = utf8_byte_length(b)
+        if is_lower_like(decode_codepoint(span.unsafe_ptr() + pos, cplen)):
+            return cplen
+        return 0
+
+    @staticmethod
+    @always_inline
+    def _upper_len_at[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
+        """Byte length of the codepoint at pos if it is in
+        [\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}], else 0."""
+        var b = span[pos]
+        if b < 0x80:
+            var ib = Int(b)
+            if 65 <= ib <= 90:
+                return 1
+            return 0
+        var cplen = utf8_byte_length(b)
+        if is_upper_like(decode_codepoint(span.unsafe_ptr() + pos, cplen)):
+            return cplen
+        return 0
+
+    @staticmethod
+    @always_inline
+    def _prefix_len[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int) -> Int:
+        """Byte length of the optional prefix [^\\r\\n\\p{L}\\p{N}], or 0."""
+        var lead = span[pos]
+        if lead < 0x80:
+            if (
+                Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)
+            ) == 0:
+                return 1
+            return 0
+        var cplen = utf8_byte_length(lead)
+        var cp = decode_codepoint(span.unsafe_ptr() + pos, cplen)
+        if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
+            return cplen
+        return 0
+
+    @staticmethod
+    @always_inline
+    def _alt1_from[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int, preflen: Int) raises -> Int:
+        """alt 1 core: after ``preflen`` optional prefix bytes, match
+        [upper]*[lower]+ with greedy upper* backtracking.
+
+        upper* greedily consumes [\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}], then
+        gives back codepoints until the rightmost boundary whose following
+        codepoint is in [\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}] (so lower+ is
+        non-empty).  Returns the full match length from ``pos``, or 0.
+        """
+        var n = len(span)
+        var start = pos + preflen
+        if start >= n:
+            return 0
+        var best_B = -1
+        if GPT4Pretokenizer._lower_len_at(span, start) > 0:
+            best_B = start
+        var i = start
+        while i < n:
+            var l = GPT4Pretokenizer._upper_len_at(span, i)
+            if l == 0:
+                break
+            i += l
+            if i < n and GPT4Pretokenizer._lower_len_at(span, i) > 0:
+                best_B = i
+        if best_B < 0:
+            return 0
+        var j = best_B
+        while j < n:
+            var l = GPT4Pretokenizer._lower_len_at(span, j)
+            if l == 0:
+                break
+            j += l
+        if j == best_B:
+            return 0
+        var cont = GPT4Pretokenizer._match_contraction(span, j)
+        if cont > 0:
+            j += cont
+        return j - pos
+
+    @staticmethod
+    @always_inline
+    def _alt2_from[
+        origin: Origin, //
+    ](span: Span[UInt8, origin], pos: Int, preflen: Int) raises -> Int:
+        """alt 2 core: after ``preflen`` optional prefix bytes, match
+        [upper]+[lower]* — greedy, no backtracking needed (lower* is
+        optional).  Returns the full match length from ``pos``, or 0.
+        """
+        var n = len(span)
+        var i = pos + preflen
+        if i >= n:
+            return 0
+        var upper_start = i
+        while i < n:
+            var l = GPT4Pretokenizer._upper_len_at(span, i)
+            if l == 0:
+                break
+            i += l
+        if i == upper_start:
+            return 0
+        while i < n:
+            var l = GPT4Pretokenizer._lower_len_at(span, i)
+            if l == 0:
+                break
+            i += l
+        var cont = GPT4Pretokenizer._match_contraction(span, i)
+        if cont > 0:
+            i += cont
+        return i - pos
+
+    @staticmethod
+    @always_inline
     def _match_o200k_alt1[
         origin: Origin, //
     ](span: Span[UInt8, origin], pos: Int) raises -> Int:
@@ -2198,71 +2109,18 @@ struct GPT4Pretokenizer[
         [^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*
           [\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?
 
-        Tries optional non-L/N prefix, then zero+ upper-like letters,
-        then one+ lower-like letters (which must include at least one Ll),
-        then optional contraction.
+        Emulates the regex backtracking: the greedy optional prefix is kept
+        if the rest can match, otherwise the prefix codepoint (e.g. a
+        combining mark) is re-examined as part of the letter classes.
         """
         var n = len(span)
-        var i = pos
-        if i >= n:
+        if pos >= n:
             return 0
-        # Optional prefix: [^\r\n\p{L}\p{N}]?
-        var lead = span[i]
-        if lead < 0x80:
-            if (
-                Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)
-            ) == 0:
-                i += 1
-                if i >= n:
-                    return 0
-        else:
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
-                i += cplen
-                if i >= n:
-                    return 0
-        # Upper-like letters: [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*
-        while i < n:
-            var b = span[i]
-            if b < 0x80:
-                if 65 <= Int(b) <= 90:
-                    i += 1
-                else:
-                    break
-            else:
-                var cur_lead = b
-                var cur_len = utf8_byte_length(cur_lead)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-                if is_upper_like(cur_cp):
-                    i += cur_len
-                else:
-                    break
-        # Lower-like letters: [\p{Ll}\p{Lm}\p{Lo}\p{M}]+
-        var lower_start = i
-        while i < n:
-            var b = span[i]
-            if b < 0x80:
-                var ib = Int(b)
-                if (65 <= ib <= 90) or (97 <= ib <= 122):
-                    i += 1
-                else:
-                    break
-            else:
-                var cur_lead = b
-                var cur_len = utf8_byte_length(cur_lead)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-                if is_lower_like(cur_cp):
-                    i += cur_len
-                else:
-                    break
-        if i == lower_start:
-            return 0
-        # Optional contraction: (?i:'s|'t|'re|'ve|'m|'ll|'d)?
-        var cont = GPT4Pretokenizer._match_contraction(span, i)
-        if cont > 0:
-            i += cont
-        return i - pos
+        var preflen = GPT4Pretokenizer._prefix_len(span, pos)
+        var with_pref = GPT4Pretokenizer._alt1_from(span, pos, preflen)
+        if with_pref > 0:
+            return with_pref
+        return GPT4Pretokenizer._alt1_from(span, pos, 0)
 
     @staticmethod
     @always_inline
@@ -2276,72 +2134,17 @@ struct GPT4Pretokenizer[
 
         Like alt 1 but requires 1+ upper-like letters first, then optional
         lower-like letters.  Catches all-caps words and sequences without
-        a lowercase component.
-
-        Note: alt 1 is tried first.  This alternative only fires when
-        there are upper-like letters with no following lower-like letters.
+        a lowercase component.  The optional prefix is kept greedily if the
+        rest can match.
         """
         var n = len(span)
-        var i = pos
-        if i >= n:
+        if pos >= n:
             return 0
-        # Optional prefix: [^\r\n\p{L}\p{N}]?
-        var lead = span[i]
-        if lead < 0x80:
-            if (
-                Int(BYTE_CLASS[Int(lead)]) & (BC_LETTER | BC_DIGIT | BC_CRLF)
-            ) == 0:
-                i += 1
-                if i >= n:
-                    return 0
-        else:
-            var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
-            if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
-                i += cplen
-                if i >= n:
-                    return 0
-        # Upper-like letters: [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+
-        var upper_start = i
-        while i < n:
-            var b = span[i]
-            if b < 0x80:
-                if 65 <= Int(b) <= 90:
-                    i += 1
-                else:
-                    break
-            else:
-                var cur_lead = b
-                var cur_len = utf8_byte_length(cur_lead)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-                if is_upper_like(cur_cp):
-                    i += cur_len
-                else:
-                    break
-        if i == upper_start:
-            return 0
-        # Lower-like letters: [\p{Ll}\p{Lm}\p{Lo}\p{M}]*
-        while i < n:
-            var b = span[i]
-            if b < 0x80:
-                var ib = Int(b)
-                if (65 <= ib <= 90) or (97 <= ib <= 122):
-                    i += 1
-                else:
-                    break
-            else:
-                var cur_lead = b
-                var cur_len = utf8_byte_length(cur_lead)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
-                if is_lower_like(cur_cp):
-                    i += cur_len
-                else:
-                    break
-        # Optional contraction: (?i:'s|'t|'re|'ve|'m|'ll|'d)?
-        var cont = GPT4Pretokenizer._match_contraction(span, i)
-        if cont > 0:
-            i += cont
-        return i - pos
+        var preflen = GPT4Pretokenizer._prefix_len(span, pos)
+        var with_pref = GPT4Pretokenizer._alt2_from(span, pos, preflen)
+        if with_pref > 0:
+            return with_pref
+        return GPT4Pretokenizer._alt2_from(span, pos, 0)
 
     @staticmethod
     @always_inline
@@ -2389,20 +2192,24 @@ struct GPT4Pretokenizer[
     def _match_o200k_ws_run[
         origin: Origin, //
     ](span: Span[UInt8, origin], pos: Int) -> Int:
-        """Match o200k alternative 7: \\s+ — one or more ASCII whitespace bytes.
+        """Match o200k alternative 7: \\s+ — one or more Unicode whitespace
+        codepoints.
 
-        Unlike cl100k's final \\s (single byte), o200k uses \\s+ to consume
-        an entire whitespace run in one token.
+        Unlike cl100k's final \\s (single codepoint), o200k uses \\s+ to
+        consume an entire whitespace run in one token.
         """
         var n = len(span)
         if pos >= n:
             return 0
-        if not is_ascii_ws_byte(Int(span[pos])):
-            return 0
-        var i = pos + 1
-        while i < n and is_ascii_ws_byte(Int(span[i])):
-            i += 1
-        return i - pos
+        var total = 0
+        var i = pos
+        while i < n:
+            var l = is_ws_at(span, i)
+            if l == 0:
+                break
+            total += l
+            i += l
+        return total
 
     @staticmethod
     @always_inline
@@ -2411,36 +2218,28 @@ struct GPT4Pretokenizer[
     ](span: Span[UInt8, origin], pos: Int) -> Int:
         """Match o200k alternative 5: \\s*[\\r\\n]+.
 
-        Like cl100k alt 6 but requires 1+ CR/LF characters, not exactly 1.
+        Like cl100k alt 6 but consumes one or more CR/LF characters.
 
-        Implements regex backtracking: \\s* greedily consumes all ASCII
-        whitespace, then shrinks from the right until the remaining suffix
-        ends with at least one CR or LF.
+        Implements regex backtracking: \\s* greedily consumes the maximal
+        Unicode-whitespace run, then gives back codepoints until the
+        remaining suffix ends with 1+ CR or LF.  The match ends right
+        after the rightmost CR/LF codepoint in the run.
         """
         var n = len(span)
         if pos >= n:
             return 0
-        # Scan forward to find end of full ASCII-whitespace run
-        var ws_end = pos
-        while ws_end < n and is_ascii_ws_byte(Int(span[ws_end])):
-            ws_end += 1
-        if ws_end == pos:
-            return 0
-        # Scan backward from ws_end to find a CR/LF, then include all
-        # consecutive CR/LF bytes after it.  This simulates the regex
-        # backtracking: \\s* [\\r\\n]+  where \\s* gives up characters
-        # until [\\r\\n]+ can match at least one.
-        var i = ws_end
-        while i > pos:
-            i -= 1
+        var i = pos
+        var last_crlf_end = -1
+        while i < n:
+            var l = is_ws_at(span, i)
+            if l == 0:
+                break
             if span[i] == UInt8(10) or span[i] == UInt8(13):
-                var j = i
-                while j < ws_end and (
-                    span[j] == UInt8(10) or span[j] == UInt8(13)
-                ):
-                    j += 1
-                return j - pos
-        return 0
+                last_crlf_end = i + 1
+            i += l
+        if last_crlf_end < 0:
+            return 0
+        return last_crlf_end - pos
 
     @staticmethod
     @always_inline

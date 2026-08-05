@@ -54,6 +54,19 @@ def _uint8_list_list_to_py_list(data: List[List[UInt8]]) raises -> PythonObject:
     return Python.list(Span[PythonObject](py_vals))
 
 
+def _views_to_py_bytes[
+    mut: Bool, //, origin: Origin[mut=mut]
+](views: List[StringSlice[origin]]) raises -> PythonObject:
+    """Copy zero-copy word views into a Python list of bytes objects."""
+    var py_vals = List[PythonObject](capacity=len(views))
+    for v in views:
+        var data = List[UInt8](capacity=v.byte_length())
+        for b in v.as_bytes():
+            data.append(b)
+        py_vals.append(_uint8_list_to_py_bytes(data))
+    return Python.list(Span[PythonObject](py_vals))
+
+
 def _py_ids_to_mojo(py_ids: PythonObject) raises -> List[Int]:
     var n = len(py_ids)
     ref cpy = Python().cpython()
@@ -198,6 +211,10 @@ def _encode_ordinary_gpt2(mut self: PythonObject, mut args: PythonObject) raises
     var ptr = self.downcast_value_ptr[GPT2TK]()
     return _list_of_int_to_py(ptr[].encode_ordinary(Python().as_string_slice(args[0])))
 
+def _pretokenize_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPT2TK]()
+    return _views_to_py_bytes(ptr[].pretokenize(Python().as_string_slice(args[0])))
+
 def _decode_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
     var py_ids = args[0]
@@ -267,6 +284,10 @@ def _encode_ordinary_gpt4(mut self: PythonObject, mut args: PythonObject) raises
     var ptr = self.downcast_value_ptr[GPT4TK]()
     return _list_of_int_to_py(ptr[].encode_ordinary(Python().as_string_slice(args[0])))
 
+def _pretokenize_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPT4TK]()
+    return _views_to_py_bytes(ptr[].pretokenize(Python().as_string_slice(args[0])))
+
 def _decode_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
     var py_ids = args[0]
@@ -335,6 +356,10 @@ def _encode_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> Pyth
 def _encode_ordinary_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
     return _list_of_int_to_py(ptr[].encode_ordinary(Python().as_string_slice(args[0])))
+
+def _pretokenize_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
+    var ptr = self.downcast_value_ptr[GPT4oTK]()
+    return _views_to_py_bytes(ptr[].pretokenize(Python().as_string_slice(args[0])))
 
 def _decode_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
@@ -456,6 +481,7 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_train_gpt2]("train") \
             .def_py_method[_encode_gpt2]("encode") \
             .def_py_method[_encode_ordinary_gpt2]("encode_ordinary") \
+            .def_py_method[_pretokenize_gpt2]("pretokenize") \
             .def_py_method[_decode_gpt2]("decode") \
             .def_py_method[_n_vocab_gpt2]("n_vocab") \
             .def_py_method[_save_tiktok_gpt2]("save_tiktoken") \
@@ -475,6 +501,7 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_train_gpt4]("train") \
             .def_py_method[_encode_gpt4]("encode") \
             .def_py_method[_encode_ordinary_gpt4]("encode_ordinary") \
+            .def_py_method[_pretokenize_gpt4]("pretokenize") \
             .def_py_method[_decode_gpt4]("decode") \
             .def_py_method[_n_vocab_gpt4]("n_vocab") \
             .def_py_method[_save_tiktok_gpt4]("save_tiktoken") \
@@ -494,6 +521,7 @@ def PyInit_mbpe() abi("C") -> PythonObject:
             .def_py_method[_train_gpt4o]("train") \
             .def_py_method[_encode_gpt4o]("encode") \
             .def_py_method[_encode_ordinary_gpt4o]("encode_ordinary") \
+            .def_py_method[_pretokenize_gpt4o]("pretokenize") \
             .def_py_method[_decode_gpt4o]("decode") \
             .def_py_method[_n_vocab_gpt4o]("n_vocab") \
             .def_py_method[_save_tiktok_gpt4o]("save_tiktoken") \
