@@ -1,4 +1,3 @@
-"""mbpe BPE tokenizer — Byte Pair Encoding in Mojo."""
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import (
     GPT2Pretokenizer,
@@ -6,3 +5,4 @@ from bpe.pretokenizer import (
     PreTokenizer,
     ByteMapping,
 )
+

@@ -2,6 +2,8 @@
 
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 [![CodeQL](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml)
+[![PyPI version](https://img.shields.io/pypi/v/mbpe)](https://pypi.org/project/mbpe/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/mbpe)](https://pypi.org/project/mbpe/)
 
 A **high-performance**, trainable, tiktoken-compatible BPE tokenizer written in **Mojo**.
 The compile-time `PreTokenizer` trait enables GPT-2, GPT-4, GPT-4o and custom tokenization pipelines without changing the core tokenizer.
@@ -14,6 +16,8 @@ tokens = tokenizer.encode("hello world")
 print(tokens)                          # [31373, 995]
 print(tokenizer.decode(tokens))        # "hello world"
 ```
+
+> **Support mbpe** — if this library saved you time, please [star the repository](https://github.com/ratulb/mbpe). It is the only support this project asks for, and it helps others discover it.
 
 ---
 
@@ -281,6 +285,8 @@ pixi run mojo build python-binding/mbpe.mojo -I . \
 # Run Python tests
 # pixi run --environment dev python -m pytest tests/python/ -v
 ```
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started, run the suite, and open a pull request.
 
 ---
 
