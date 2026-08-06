@@ -26,8 +26,6 @@ print(tokenizer.decode(tokens))        # "hello world"
 - **Extensible by design** — `PreTokenizer` is a Mojo trait, not a hardcoded implementation. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
 - **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
 
-> **Note:** the legacy `GPreTokenizer` (Ġ space convention) was removed. The default pre-tokenizer is now the GPT-2 `GPT2Pretokenizer`; `mbpe.GPreTokenizer` and the `"gpre"` encoding no longer exist.
-
 ---
 
 ## Installation
