@@ -17,8 +17,6 @@ print(tokens)                          # [31373, 995]
 print(tokenizer.decode(tokens))        # "hello world"
 ```
 
-> **Support mbpe** — if this library saved you time, please [star the repository](https://github.com/ratulb/mbpe). It is the only support this project asks for, and it helps others discover it.
-
 ---
 
 ## Why mbpe?
@@ -339,4 +337,9 @@ Module-level functions:
 - [tiktoken](https://github.com/openai/tiktoken) — OpenAI's BPE tokenizer (Rust + Python); the format and API mbpe is compatible with
 - [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
 - [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
+
+---
+> **Support mbpe** — Helps others discover it.
+
+
 
