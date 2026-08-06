@@ -173,36 +173,36 @@ def main() raises:
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **13.0** | **161.6** |
-| mbpe — Python bindings | 1.54M | 10.8 | 83.0 |
-| tiktoken (Python) | 1.54M | 4.8 | 39.2 |
-| tiktoken-rs | 1.53M | 4.3 | 67.5 |
+| **mbpe — Mojo native** | 1.54M | **11.9** | **145.1** |
+| mbpe — Python bindings | 1.54M | 10.6 | 79.5 |
+| tiktoken (Python) | 1.54M | 4.7 | 38.8 |
+| tiktoken-rs | 1.53M | 4.2 | 65.7 |
 
 #### cl100k (cl100k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **10.7** | **165.2** |
-| mbpe — Python bindings | 1.28M | 9.4 | 87.4 |
-| tiktoken (Python) | 1.28M | 4.2 | 34.6 |
-| tiktoken-rs | 1.28M | 4.1 | 66.3 |
+| **mbpe — Mojo native** | 1.28M | **10.5** | **157.1** |
+| mbpe — Python bindings | 1.28M | 8.5 | 73.5 |
+| tiktoken (Python) | 1.28M | 4.1 | 31.9 |
+| tiktoken-rs | 1.28M | 3.5 | 67.6 |
 
 #### o200k (o200k_base)
 
 | Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
 |---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **8.8** | **163.2** |
-| mbpe — Python bindings | 1.28M | 7.6 | 78.7 |
-| tiktoken (Python) | 1.28M | 5.7 | 37.4 |
-| tiktoken-rs | 1.28M | 7.2 | 71.5 |
+| **mbpe — Mojo native** | 1.28M | **8.6** | **155.5** |
+| mbpe — Python bindings | 1.28M | 7.2 | 77.4 |
+| tiktoken (Python) | 1.28M | 6.0 | 39.3 |
+| tiktoken-rs | 1.28M | 6.4 | 66.2 |
 
 **Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
 
 | Vocab size | 500 | 1000 | 2000 | 4000 |
 |---|---|---|---|---|
-| Train time | 42 ms | 46 ms | 51 ms | 71 ms |
-| Merges/s | 5799 | 16075 | 33643 | 52416 |
-| Encode (M tok/s) | 23.3 | 18.6 | 15.1 | 12.9 |
+| Train time | 45 ms | 46 ms | 55 ms | 74 ms |
+| Merges/s | 5397 | 15855 | 31316 | 50059 |
+| Encode (M tok/s) | 21.5 | 17.5 | 14.2 | 12.6 |
 
 *Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
@@ -339,7 +339,7 @@ Module-level functions:
 - [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
 
 ---
-> **Support mbpe** — Helps others discover it.
+> ⭐ — Helps others discover it.
 
 
 
