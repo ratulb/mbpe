@@ -1842,6 +1842,16 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             if rank > max_id:
                 max_id = rank
 
+        # ---- Validate the file actually contained tokens ----------------
+        # An empty (or all-blank) .tiktoken file would otherwise fall
+        # through to the all_tokens[token_id] access below and hard-abort
+        # the process (SIGABRT), killing the whole host kernel (e.g. a
+        # Jupyter/Colab notebook). Raise a catchable error instead.
+        if len(all_tokens) == 0:
+            raise Error(
+                "load_tiktoken: '" + path + "' contains no token lines"
+            )
+
         # ---- Rebuild token_table (raw bytes) -----------------------------
         # Store each token's raw bytes VERBATIM -- no display-string
         # round-trip.  (The old code re-derived the safe-Unicode display
