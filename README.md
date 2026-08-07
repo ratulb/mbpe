@@ -73,6 +73,9 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 *Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
+---
+
+> ⭐ — Helps others discover it!
 
 ---
 
@@ -338,8 +341,6 @@ Module-level functions:
 - [tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) — Rust port of tiktoken
 - [minbpe](https://github.com/karpathy/minbpe) — Karpathy's minimal, from-scratch BPE reference implementation in pure Python
 
----
-> ⭐ — Helps others discover it.
 
 
 
