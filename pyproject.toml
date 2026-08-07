@@ -9,11 +9,11 @@ description = "BPE tokenizer — Mojo implementation with Python bindings"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
-authors = [{name = "tenmoomnet"}]
+authors = [{name = "ratulb"}]
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/tenmoomnet/mbpe"
+Homepage = "https://github.com/ratulb/mbpe"
 
 [tool.setuptools.packages.find]
 where = ["python-binding"]

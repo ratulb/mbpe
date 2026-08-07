@@ -105,15 +105,6 @@ def _letters8(x: UInt64) -> UInt64:
     return below_z & ~below_a
 
 @always_inline
-def _ctpop64(x: UInt64) -> Int:
-    var y = x - ((x >> 1) & UInt64(0x5555555555555555))
-    y = (y & UInt64(0x3333333333333333)) + (
-        (y >> 2) & UInt64(0x3333333333333333)
-    )
-    y = (y + (y >> 4)) & UInt64(0x0F0F0F0F0F0F0F0F)
-    return Int((y * UInt64(0x0101010101010101)) >> 56)
-
-@always_inline
 def _swar_letter_run[
     origin: Origin, //
 ](span: Span[UInt8, origin], i: Int, n: Int) -> Int:
@@ -126,7 +117,6 @@ def _swar_letter_run[
         var nl = ~_letters8(w) & UInt64(0x8080808080808080)
         if nl != 0:
             var lsb = nl & (UInt64(0) - nl)
-
             return consumed + (pop_count(lsb - 1).__int__() >> 3)
         consumed += 8
         j += 8
