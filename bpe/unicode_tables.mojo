@@ -359,8 +359,6 @@ def is_mark(cp: Int) -> Bool:
 
 @always_inline
 def is_whitespace(cp: Int) -> Bool:
-    if cp < 128:
-        return cp == 0x0009 or cp == 0x000A or cp == 0x000D or cp == 0x0020
     return (_class_mask(UInt32(cp)) & UInt8(32)) != 0
 
 @always_inline

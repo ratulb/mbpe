@@ -71,11 +71,12 @@ FUNC_META = {
         "Exact Unicode property membership (generated from Unicode data).",
         "False",
     ),
-    # Note: U+000B/U+000C are White_Space but omitted here (pre-existing
-    # quirk; the byte-level LUT handles them before is_whitespace is reached).
+    # No ASCII fast path: the table is correct for every codepoint (including
+    # U+000B/U+000C), and the pretokenizer's byte-level BYTE_CLASS LUT handles
+    # ASCII before is_whitespace is ever reached.
     "is_whitespace": (
         "Return True if cp is a Unicode whitespace codepoint.",
-        "cp == 0x0009 or cp == 0x000A or cp == 0x000D or cp == 0x0020",
+        None,
     ),
 }
 
@@ -231,25 +232,23 @@ def assert_equivalence(bounds, masks, chain, classes):
 def assert_ascii_branches(meta, classes):
     """Hardcoded ASCII fast paths must match the oracle below U+0080.
 
-    `classes` maps name -> merged intervals.  The one documented exception is
-    is_whitespace: U+000B/U+000C are White_Space in the oracle but omitted
-    from the ASCII branch (pre-existing quirk, preserved).
+    `classes` maps name -> merged intervals.  `is_whitespace` has no ASCII
+    fast path (the table is correct for all codepoints), so it is skipped.
     """
     for name, _, _ in BASE_FUNCS:
-        doc, ascii_expr = meta[name]
-        ns = {}
+        _doc, ascii_expr = meta[name]
+        if ascii_expr is None:
+            continue
         oracle = {cp for cp in range(128)
                   if _in_intervals(cp, classes[name])}
         branch = {cp for cp in range(128)
                   if eval(ascii_expr, {"__builtins__": {}}, {"cp": cp})}
-        if name == "is_whitespace":
-            branch |= {0x0B, 0x0C}  # quirk: oracle sees them as ws
         if oracle != branch:
             sys.exit(
                 f"ASCII branch drift for {name}: oracle {sorted(oracle)} "
                 f"!= branch {sorted(branch)}"
             )
-    print("ASCII fast paths == oracle below U+0080 (quirk preserved)")
+    print("ASCII fast paths == oracle below U+0080")
 
 
 def _in_intervals(cp, iv):
@@ -276,12 +275,18 @@ def emit(bounds, masks, meta, unicode_note):
     func_defs = []
     for name, _, bit in BASE_FUNCS:
         _doc, ascii_expr = meta[name]
-        func_defs.append(
-            f"@always_inline\ndef {name}(cp: Int) -> Bool:\n"
-            f"    if cp < 128:\n"
-            f"        return {ascii_expr}\n"
-            f"    return (_class_mask(UInt32(cp)) & UInt8({bit})) != 0\n"
-        )
+        if ascii_expr is None:
+            func_defs.append(
+                f"@always_inline\ndef {name}(cp: Int) -> Bool:\n"
+                f"    return (_class_mask(UInt32(cp)) & UInt8({bit})) != 0\n"
+            )
+        else:
+            func_defs.append(
+                f"@always_inline\ndef {name}(cp: Int) -> Bool:\n"
+                f"    if cp < 128:\n"
+                f"        return {ascii_expr}\n"
+                f"    return (_class_mask(UInt32(cp)) & UInt8({bit})) != 0\n"
+            )
     func_defs.append(
         "@always_inline\ndef is_letter_or_digit(cp: Int) -> Bool:\n"
         "    return is_letter(cp) or is_digit(cp)\n"
