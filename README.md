@@ -30,6 +30,52 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 ---
 
+## Benchmarks
+
+5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
+
+> **Across all three OpenAI encodings, native Mojo is consistently the fastest implementation for both encoding and decoding, while the Python bindings substantially outperform Python tiktoken**.
+
+#### gpt2 (r50k_base)
+
+| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
+|---|---|---|---|
+| **mbpe — Mojo native** | 1.54M | **14.4** | **169.4** |
+| mbpe — Python bindings | 1.54M | 12.2 | 95.2 |
+| tiktoken (Python) | 1.54M | 5.1 | 41.4 |
+| tiktoken-rs | 1.53M | 4.7 | 70.6 |
+
+#### cl100k (cl100k_base)
+
+| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
+|---|---|---|---|
+| **mbpe — Mojo native** | 1.28M | **11.9** | **166.1** |
+| mbpe — Python bindings | 1.28M | 9.9 | 85.3 |
+| tiktoken (Python) | 1.28M | 4.6 | 39.9 |
+| tiktoken-rs | 1.28M | 4.5 | 75.1 |
+
+#### o200k (o200k_base)
+
+| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
+|---|---|---|---|
+| **mbpe — Mojo native** | 1.28M | **9.6** | **164.8** |
+| mbpe — Python bindings | 1.28M | 8.2 | 84.9 |
+| tiktoken (Python) | 1.28M | 7.1 | 46.4 |
+| tiktoken-rs | 1.28M | 8.1 | 78.1 |
+
+**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
+
+| Vocab size | 500 | 1000 | 2000 | 4000 |
+|---|---|---|---|---|
+| Train time | 39 ms | 43 ms | 50 ms | 67 ms |
+| Merges/s | 6104 | 17184 | 34528 | 55201 |
+| Encode (M tok/s) | 25.8 | 19.5 | 15.8 | 14.0 |
+
+*Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
+
+
+---
+
 ## Installation
 
 ```bash
@@ -159,52 +205,6 @@ def main() raises:
     corpus.append("hello world")
     tok.train(corpus, 300)
 ```
-
-
----
-
-## Benchmarks
-
-5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
-
-> **Across all three OpenAI encodings, native Mojo is consistently the fastest implementation for both encoding and decoding, while the Python bindings substantially outperform Python tiktoken**.
-
-#### gpt2 (r50k_base)
-
-| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
-|---|---|---|---|
-| **mbpe — Mojo native** | 1.54M | **14.4** | **169.4** |
-| mbpe — Python bindings | 1.54M | 12.2 | 95.2 |
-| tiktoken (Python) | 1.54M | 5.1 | 41.4 |
-| tiktoken-rs | 1.53M | 4.7 | 70.6 |
-
-#### cl100k (cl100k_base)
-
-| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
-|---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **11.9** | **166.1** |
-| mbpe — Python bindings | 1.28M | 9.9 | 85.3 |
-| tiktoken (Python) | 1.28M | 4.6 | 39.9 |
-| tiktoken-rs | 1.28M | 4.5 | 75.1 |
-
-#### o200k (o200k_base)
-
-| Implementation | Tokens | Encode (M tok/s) | Decode (M tok/s) |
-|---|---|---|---|
-| **mbpe — Mojo native** | 1.28M | **9.6** | **164.8** |
-| mbpe — Python bindings | 1.28M | 8.2 | 84.9 |
-| tiktoken (Python) | 1.28M | 7.1 | 46.4 |
-| tiktoken-rs | 1.28M | 8.1 | 78.1 |
-
-**Training throughput** (Mojo, self-trained, GPT4Pretokenizer (cl100k_base / o200k_base), 5 MB corpus):
-
-| Vocab size | 500 | 1000 | 2000 | 4000 |
-|---|---|---|---|---|
-| Train time | 39 ms | 43 ms | 50 ms | 67 ms |
-| Merges/s | 6104 | 17184 | 34528 | 55201 |
-| Encode (M tok/s) | 25.8 | 19.5 | 15.8 | 14.0 |
-
-*Environment: INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 4 cores, 7.8Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
 
 ---
 
