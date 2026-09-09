@@ -161,7 +161,7 @@ def mojo_ver():
     # Try pixi first (mojo not on PATH in pixi-managed envs)
     v = run(['pixi', 'run', 'mojo', '--version'])
     if v != 'N/A':
-        # Extract version number from 'Mojo 1.0.0b2 (...)' or similar
+        # Extract version number from 'Mojo 1.0.0 (...)' or similar
         parts = v.split()
         if len(parts) >= 2:
             return parts[1]
@@ -216,7 +216,7 @@ rust = rust_ver()
 tt = tiktoken_ver()
 
 # Match the existing README format:
-# *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0b2, Python 3.14.6, Rust 1.97.1, tiktoken 0.13.0.*
+# *Environment: Intel Xeon @ 3.10 GHz, 8 cores, 31 Gi RAM, Ubuntu 24.04. Mojo 1.0.0, Python 3.14.7, Rust 1.97.1, tiktoken 0.14.0.*
 parts = [f'{cpu}, {cores} cores, {mem} RAM, {os_name}.']
 tools = []
 if mojo != 'N/A':   tools.append(f'Mojo {mojo}')

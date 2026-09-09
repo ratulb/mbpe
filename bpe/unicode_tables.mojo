@@ -1,4 +1,5 @@
-from std.collections.inline_array import InlineArray
+from std.builtin.globals import global_constant
+from std.collections.array import Array
 
 comptime BIT_L: UInt8 = 1
 comptime BIT_N: UInt8 = 2
@@ -7,7 +8,7 @@ comptime BIT_u: UInt8 = 8
 comptime BIT_M: UInt8 = 16
 comptime BIT_W: UInt8 = 32
 
-comptime BOUNDS: InlineArray[UInt32, 3219] = [
+comptime BOUNDS: Array[UInt32, 3219] = [
     0x0, 0x9, 0xE, 0x20, 0x21, 0x30, 0x3A, 0x41, 0x5B, 0x61, 0x7B, 0x85, 0x86, 0xA0, 0xA1, 0xAA,
     0xAB, 0xB2, 0xB4, 0xB5, 0xB6, 0xB9, 0xBA, 0xBB, 0xBC, 0xBF, 0xC0, 0xD7, 0xD8, 0xDF, 0xF7, 0xF8,
     0x100, 0x101, 0x102, 0x103, 0x104, 0x105, 0x106, 0x107, 0x108, 0x109, 0x10A, 0x10B, 0x10C, 0x10D, 0x10E, 0x10F,
@@ -211,7 +212,7 @@ comptime BOUNDS: InlineArray[UInt32, 3219] = [
     0x1FBFA, 0x20000, 0x2A6E0, 0x2A700, 0x2B81E, 0x2B820, 0x2CEAE, 0x2CEB0, 0x2EBE1, 0x2EBF0, 0x2EE5E, 0x2F800, 0x2FA1E, 0x30000, 0x3134B, 0x31350,
     0x3347A, 0xE0100, 0xE01F0,
 ]
-comptime MASKS: InlineArray[UInt8, 3219] = [
+comptime MASKS: Array[UInt8, 3219] = [
     0, 32, 0, 32, 0, 2, 0, 9, 0, 5, 0, 32, 0, 32, 0, 1, 0, 2, 0, 5, 0, 2, 1, 0, 2, 0, 9, 0, 9, 5, 0, 5,
     9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5,
     9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5, 9, 5,
@@ -317,15 +318,18 @@ comptime MASKS: InlineArray[UInt8, 3219] = [
 
 @always_inline
 def _class_mask(cp: UInt32) -> UInt8:
+
+    ref bounds = global_constant[BOUNDS]()
+    ref masks = global_constant[MASKS]()
     var lo: Int = 0
     var hi: Int = 3218
     while lo < hi:
         var mid = (lo + hi + 1) >> 1
-        if BOUNDS.unsafe_get(mid) <= cp:
+        if bounds.unsafe_get(mid) <= cp:
             lo = mid
         else:
             hi = mid - 1
-    return MASKS.unsafe_get(lo)
+    return masks.unsafe_get(lo)
 
 @always_inline
 def is_letter(cp: Int) -> Bool:
