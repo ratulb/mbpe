@@ -10,7 +10,8 @@ from std.time import perf_counter_ns
 # ═══════════════════════════════════════════════════════════════════════════
 
 struct Timer:
-    var _start: UInt
+    # 1.0.0: perf_counter_ns() returns Int (was UInt-sized).
+    var _start: Int
     def __init__(out self): self._start = 0
     def start(mut self): self._start = perf_counter_ns()
     def elapsed_ns(self) -> Int: return Int(perf_counter_ns() - self._start)

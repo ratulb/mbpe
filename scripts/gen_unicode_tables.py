@@ -308,7 +308,8 @@ def emit(bounds, masks, meta, unicode_note):
 
     distinct = sorted(set(masks))
     content = f"""\
-from std.collections.inline_array import InlineArray
+from std.builtin.globals import global_constant
+from std.collections.array import Array
 
 comptime BIT_L: UInt8 = {BIT_L}
 comptime BIT_N: UInt8 = {BIT_N}
@@ -317,24 +318,30 @@ comptime BIT_u: UInt8 = {BIT_u}
 comptime BIT_M: UInt8 = {BIT_M}
 comptime BIT_W: UInt8 = {BIT_W}
 
-comptime BOUNDS: InlineArray[UInt32, {N}] = [
+comptime BOUNDS: Array[UInt32, {N}] = [
 {fmt_list(bounds, 16, lambda v: f"0x{v:X}")}
 ]
-comptime MASKS: InlineArray[UInt8, {N}] = [
+comptime MASKS: Array[UInt8, {N}] = [
 {fmt_list(masks, 32, lambda v: str(v))}
 ]
 
 @always_inline
 def _class_mask(cp: UInt32) -> UInt8:
+    # 1.0.0: Array is no longer ImplicitlyCopyable, so a comptime table
+    # cannot be touched directly at runtime (materialization error).
+    # global_constant() parks each table in static memory once; the refs
+    # below are zero-copy views (see the manual's "Global lookup tables").
+    ref bounds = global_constant[BOUNDS]()
+    ref masks = global_constant[MASKS]()
     var lo: Int = 0
     var hi: Int = {N - 1}
     while lo < hi:
         var mid = (lo + hi + 1) >> 1
-        if BOUNDS.unsafe_get(mid) <= cp:
+        if bounds.unsafe_get(mid) <= cp:
             lo = mid
         else:
             hi = mid - 1
-    return MASKS.unsafe_get(lo)
+    return masks.unsafe_get(lo)
 
 {chr(10).join(func_defs)}
 """

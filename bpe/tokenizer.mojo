@@ -153,10 +153,10 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
 
 @fieldwise_init
 struct MergeScratch(ImplicitlyCopyable & RegisterPassable):
-    var ids: UnsafePointer[Int, MutAnyOrigin]
-    var nxt: UnsafePointer[Int, MutAnyOrigin]
-    var prv: UnsafePointer[Int, MutAnyOrigin]
-    var alive: UnsafePointer[UInt8, MutAnyOrigin]
+    var ids: UnsafePointer[Int, MutUntrackedOrigin]
+    var nxt: UnsafePointer[Int, MutUntrackedOrigin]
+    var prv: UnsafePointer[Int, MutUntrackedOrigin]
+    var alive: UnsafePointer[UInt8, MutUntrackedOrigin]
     var cap: Int
 
     def __init__(out self):
@@ -478,7 +478,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
             scratch.ensure_capacity(n)
 
-        self._copy_word_ids(ptr, n, scratch.ids)
+        self._copy_word_ids(ptr, n, scratch.ids.as_unsafe_any_origin())
 
         for i in range(n):
             scratch.nxt[i] = i + 1
@@ -553,7 +553,8 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         for word in words:
             var ptr = word.unsafe_ptr()
             var n = word.byte_length()
-            var dst = result.unsafe_ptr() + write_pos
+
+            var dst = (result.unsafe_ptr() + write_pos).as_unsafe_any_origin()
 
             if n < 2:
 
@@ -1008,7 +1009,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         for b in range(256):
             single_byte[0] = Byte(b)
             var key = BPETokenizer._bytes_key(
-                Span[Byte](ptr=single_byte.unsafe_ptr(), length=1)
+                Span[Byte](unsafe_ptr=single_byte.unsafe_ptr(), length=1)
             )
             if key in mergeable_ranks:
                 self.byte_to_rank[b] = mergeable_ranks[key]
