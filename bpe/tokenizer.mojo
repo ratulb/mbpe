@@ -1,5 +1,6 @@
 from std.pathlib import Path
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
+from std.memory.alloc import unsafe_alloc
 from std.base64 import b64encode, b64decode
 from std.os.env import getenv
 from std.collections.binary_heap import BinaryHeap
@@ -12,15 +13,10 @@ from bpe.pretokenizer import (
     WordCounts,
 )
 from bpe.shared import IntArray, ByteArray, TokenSpan, ByteSpanArena
+from bpe.tokenizer_trait import Tokenizer
 
 @fieldwise_init
-struct MergeRule(
-    ImplicitlyCopyable
-    & TrivialRegisterPassable
-    & Hashable
-    & Equatable
-    & Writable
-):
+struct MergeRule(TrivialRegisterPassable & Hashable & Equatable & Writable):
     var first: Int
     var second: Int
     var merged: Int
@@ -64,7 +60,7 @@ def _unpack_heap_key(key: Int) -> HeapKey:
     var raw = -key
     return HeapKey(raw >> HEAP_SHIFT, raw & HEAP_MASK)
 
-struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
+struct MergeLookup(ImplicitlyCopyable & Writable):
 
     var _fast: IntArray
     var _slow: Dict[Int, Int]
@@ -84,14 +80,14 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
     @always_inline
     def set(mut self, id1: Int, id2: Int, merged_id: Int):
         if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
-            self._fast.unsafe_ptr()[(id1 << CACHE_SHIFT) | id2] = merged_id
+            self._fast.unsafe_ptr()[unsafe_offset=(id1 << CACHE_SHIFT) | id2] = merged_id
         else:
             self._slow[(id1 << ENCODE_SHIFT) | id2] = merged_id
 
     @always_inline
     def get(self, id1: Int, id2: Int) -> Int:
         if id1 < CACHE_SIZE and id2 < CACHE_SIZE:
-            return self._fast.unsafe_ptr()[(id1 << CACHE_SHIFT) | id2]
+            return self._fast.unsafe_ptr()[unsafe_offset=(id1 << CACHE_SHIFT) | id2]
         return self._slow.get((id1 << ENCODE_SHIFT) | id2, -1)
 
     def write_to[T: Writer](self, mut writer: T):
@@ -101,7 +97,7 @@ struct MergeLookup(ImplicitlyCopyable & Movable & Writable):
             + String(")")
         )
 
-struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
+struct TokenByteTable(ImplicitlyCopyable & Sized & Writable):
     var arena: ByteSpanArena
 
     def __init__(out self):
@@ -153,40 +149,40 @@ struct TokenByteTable(ImplicitlyCopyable & Movable & Sized & Writable):
 
 @fieldwise_init
 struct MergeScratch(ImplicitlyCopyable & RegisterPassable):
-    var ids: UnsafePointer[Int, MutUntrackedOrigin]
-    var nxt: UnsafePointer[Int, MutUntrackedOrigin]
-    var prv: UnsafePointer[Int, MutUntrackedOrigin]
-    var alive: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var ids: Pointer[Int, MutUntrackedOrigin]
+    var nxt: Pointer[Int, MutUntrackedOrigin]
+    var prv: Pointer[Int, MutUntrackedOrigin]
+    var alive: Pointer[UInt8, MutUntrackedOrigin]
     var cap: Int
 
     def __init__(out self):
-        self.ids = alloc[Int](0)
-        self.nxt = alloc[Int](0)
-        self.prv = alloc[Int](0)
-        self.alive = alloc[UInt8](0)
+        self.ids = unsafe_alloc[Int](0)
+        self.nxt = unsafe_alloc[Int](0)
+        self.prv = unsafe_alloc[Int](0)
+        self.alive = unsafe_alloc[UInt8](0)
         self.cap = 0
 
     @always_inline
     def free(mut self):
 
-        self.ids.free()
-        self.nxt.free()
-        self.prv.free()
-        self.alive.free()
+        self.ids.unsafe_free()
+        self.nxt.unsafe_free()
+        self.prv.unsafe_free()
+        self.alive.unsafe_free()
         self.cap = 0
 
     def ensure_capacity(mut self, n: Int):
 
         if n > self.cap:
             self.free()
-            self.ids = alloc[Int](n)
-            self.nxt = alloc[Int](n)
-            self.prv = alloc[Int](n)
-            self.alive = alloc[UInt8](n)
+            self.ids = unsafe_alloc[Int](n)
+            self.nxt = unsafe_alloc[Int](n)
+            self.prv = unsafe_alloc[Int](n)
+            self.alive = unsafe_alloc[UInt8](n)
             self.cap = n
 
 struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
-    Sized & Movable & Writable
+    Sized & Movable & Writable & Tokenizer
 ):
 
     var pt: Self.PT
@@ -305,7 +301,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             word_offs.append(off_arena)
 
             for i in range(ln):
-                arena.append(Self.PT.byte_to_id(Int(wb[off + i])))
+                arena.append(Self.PT.byte_to_id(Int(wb[unsafe_offset=off + i])))
             word_len.append(ln)
             word_freq.append(freq)
             var iw = len(word_offs) - 1
@@ -345,52 +341,52 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
                 var freq = word_freq[iw]
                 var start = word_offs[iw]
                 var n = word_len[iw]
-                var wt = arena.unsafe_ptr() + start
+                var wt = arena.unsafe_ptr().unsafe_offset(start)
 
                 var w = 0
                 var i = 0
                 while i < n:
-                    if i < n - 1 and wt[i] == a_id and wt[i + 1] == b_id:
+                    if i < n - 1 and wt[unsafe_offset=i] == a_id and wt[unsafe_offset=i + 1] == b_id:
 
                         if w > 0:
 
-                            var pk = (wt[w - 1] << ENCODE_SHIFT) | wt[i]
+                            var pk = (wt[unsafe_offset=w - 1] << ENCODE_SHIFT) | wt[unsafe_offset=i]
                             if pk in stats:
                                 var nv = stats[pk] - freq
                                 stats[pk] = nv if nv > 0 else 0
 
-                        var mk = (wt[i] << ENCODE_SHIFT) | wt[i + 1]
+                        var mk = (wt[unsafe_offset=i] << ENCODE_SHIFT) | wt[unsafe_offset=i + 1]
                         if mk in stats:
                             var nv = stats[mk] - freq
                             stats[mk] = nv if nv > 0 else 0
                         if i + 2 < n:
 
-                            var nk = (wt[i + 1] << ENCODE_SHIFT) | wt[i + 2]
+                            var nk = (wt[unsafe_offset=i + 1] << ENCODE_SHIFT) | wt[unsafe_offset=i + 2]
                             if nk in stats:
                                 var nv = stats[nk] - freq
                                 stats[nk] = nv if nv > 0 else 0
 
                         if w > 0:
 
-                            var pk2 = (wt[w - 1] << ENCODE_SHIFT) | merged_id
+                            var pk2 = (wt[unsafe_offset=w - 1] << ENCODE_SHIFT) | merged_id
                             stats[pk2] = stats.get(pk2, 0) + freq
                             if pk2 not in where_dict:
                                 where_dict[pk2] = IntArray()
                             where_dict[pk2].append(iw)
                         if i + 2 < n:
 
-                            var nk2 = (merged_id << ENCODE_SHIFT) | wt[i + 2]
+                            var nk2 = (merged_id << ENCODE_SHIFT) | wt[unsafe_offset=i + 2]
                             stats[nk2] = stats.get(nk2, 0) + freq
                             if nk2 not in where_dict:
                                 where_dict[nk2] = IntArray()
                             where_dict[nk2].append(iw)
 
-                        wt[w] = merged_id
+                        wt[unsafe_offset=w] = merged_id
                         w += 1
                         i += 2
                     else:
 
-                        wt[w] = wt[i]
+                        wt[unsafe_offset=w] = wt[unsafe_offset=i]
                         w += 1
                         i += 1
 
@@ -401,20 +397,20 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
             var spans = self.token_table.arena.spans.unsafe_ptr()
             var pool = (
-                self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+                self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
             )
-            var la = spans[a_id].length
-            var lb = spans[b_id].length
+            var la = spans[unsafe_offset=a_id].length
+            var lb = spans[unsafe_offset=b_id].length
             var merged_bytes = ByteArray(capacity=la + lb)
             merged_bytes.resize(la + lb, 0)
-            memcpy(
+            unsafe_memcpy(
                 dest=merged_bytes.unsafe_ptr(),
-                src=pool + spans[a_id].offset,
+                src=pool.unsafe_offset(spans[unsafe_offset=a_id].offset),
                 count=la,
             )
-            memcpy(
-                dest=merged_bytes.unsafe_ptr() + la,
-                src=pool + spans[b_id].offset,
+            unsafe_memcpy(
+                dest=merged_bytes.unsafe_ptr().unsafe_offset(la),
+                src=pool.unsafe_offset(spans[unsafe_offset=b_id].offset),
                 count=lb,
             )
             self.token_table.add(Span[Byte](merged_bytes))
@@ -422,24 +418,24 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
     @always_inline
     def _copy_word_ids[origin: Origin](
         self,
-        ptr: UnsafePointer[UInt8, origin],
+        ptr: Pointer[UInt8, origin],
         n: Int,
-        dst: UnsafePointer[Int, MutAnyOrigin],
+        dst: Pointer[Int, MutAnyOrigin],
     ):
 
         var btr = self.byte_to_rank.unsafe_ptr()
         for i in range(n):
             comptime if Self.PT.byte_map == ByteMapping.SHUFFLED:
-                dst[i] = Self.PT.byte_to_id(Int(ptr[i]))
+                dst[unsafe_offset=i] = Self.PT.byte_to_id(Int(ptr[unsafe_offset=i]))
             else:
-                dst[i] = btr[Int(ptr[i])]
+                dst[unsafe_offset=i] = btr[unsafe_offset=Int(ptr[unsafe_offset=i])]
 
     @always_inline
     def _merge_scan[origin: Origin](
         self,
-        ptr: UnsafePointer[UInt8, origin],
+        ptr: Pointer[UInt8, origin],
         n: Int,
-        dst: UnsafePointer[Int, MutAnyOrigin],
+        dst: Pointer[Int, MutAnyOrigin],
     ) -> Int:
 
         self._copy_word_ids(ptr, n, dst)
@@ -451,12 +447,12 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             var best_b = -1
             var best_m = -1
             for i in range(len - 1):
-                var merged = self.lookup_table.get(dst[i], dst[i + 1])
+                var merged = self.lookup_table.get(dst[unsafe_offset=i], dst[unsafe_offset=i + 1])
                 if merged >= 0 and (best_rank < 0 or merged < best_rank):
 
                     best_rank = merged
-                    best_a = dst[i]
-                    best_b = dst[i + 1]
+                    best_a = dst[unsafe_offset=i]
+                    best_b = dst[unsafe_offset=i + 1]
                     best_m = merged
             if best_rank < 0:
 
@@ -467,9 +463,9 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
     @always_inline
     def _merge_heap[origin: Origin](
         self,
-        ptr: UnsafePointer[UInt8, origin],
+        ptr: Pointer[UInt8, origin],
         n: Int,
-        dst: UnsafePointer[Int, MutAnyOrigin],
+        dst: Pointer[Int, MutAnyOrigin],
         mut scratch: MergeScratch,
         mut heap: BinaryHeap[Int],
     ) -> Int:
@@ -481,13 +477,13 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         self._copy_word_ids(ptr, n, scratch.ids.as_unsafe_any_origin())
 
         for i in range(n):
-            scratch.nxt[i] = i + 1
-            scratch.prv[i] = i - 1
-            scratch.alive[i] = 1
-        scratch.nxt[n - 1] = -1
+            scratch.nxt[unsafe_offset=i] = i + 1
+            scratch.prv[unsafe_offset=i] = i - 1
+            scratch.alive[unsafe_offset=i] = 1
+        scratch.nxt[unsafe_offset=n - 1] = -1
 
         for i in range(n - 1):
-            var r0 = self.lookup_table.get(scratch.ids[i], scratch.ids[i + 1])
+            var r0 = self.lookup_table.get(scratch.ids[unsafe_offset=i], scratch.ids[unsafe_offset=i + 1])
             if r0 >= 0:
                 heap.push(_pack_heap_key(r0, i))
 
@@ -495,40 +491,40 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             var key = _unpack_heap_key(heap.pop())
             var e = key.node
             var rank = key.rank
-            if scratch.alive[e] == 0:
+            if scratch.alive[unsafe_offset=e] == 0:
 
                 continue
-            var j = scratch.nxt[e]
+            var j = scratch.nxt[unsafe_offset=e]
             if j < 0:
 
                 continue
 
-            if self.lookup_table.get(scratch.ids[e], scratch.ids[j]) != rank:
+            if self.lookup_table.get(scratch.ids[unsafe_offset=e], scratch.ids[unsafe_offset=j]) != rank:
                 continue
 
-            scratch.ids[e] = rank
-            var k = scratch.nxt[j]
+            scratch.ids[unsafe_offset=e] = rank
+            var k = scratch.nxt[unsafe_offset=j]
             if k >= 0:
-                scratch.prv[k] = e
-            scratch.nxt[e] = k
-            scratch.alive[j] = 0
+                scratch.prv[unsafe_offset=k] = e
+            scratch.nxt[unsafe_offset=e] = k
+            scratch.alive[unsafe_offset=j] = 0
 
-            var p = scratch.prv[e]
+            var p = scratch.prv[unsafe_offset=e]
             if p >= 0:
-                var rp = self.lookup_table.get(scratch.ids[p], scratch.ids[e])
+                var rp = self.lookup_table.get(scratch.ids[unsafe_offset=p], scratch.ids[unsafe_offset=e])
                 if rp >= 0:
                     heap.push(_pack_heap_key(rp, p))
             if k >= 0:
-                var rk = self.lookup_table.get(scratch.ids[e], scratch.ids[k])
+                var rk = self.lookup_table.get(scratch.ids[unsafe_offset=e], scratch.ids[unsafe_offset=k])
                 if rk >= 0:
                     heap.push(_pack_heap_key(rk, e))
 
         var count = 0
         var cur = 0
         while cur >= 0:
-            dst[count] = scratch.ids[cur]
+            dst[unsafe_offset=count] = scratch.ids[unsafe_offset=cur]
             count += 1
-            cur = scratch.nxt[cur]
+            cur = scratch.nxt[unsafe_offset=cur]
         return count
 
     def encode_ordinary[
@@ -554,7 +550,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             var ptr = word.unsafe_ptr()
             var n = word.byte_length()
 
-            var dst = (result.unsafe_ptr() + write_pos).as_unsafe_any_origin()
+            var dst = (result.unsafe_ptr().unsafe_offset(write_pos)).as_unsafe_any_origin()
 
             if n < 2:
 
@@ -569,6 +565,15 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
         result.resize(write_pos, 0)
         return result^
+
+    def encode(self, text: String) raises -> List[Int]:
+
+        var slice: StringSlice = text
+        return self.encode(slice)
+
+    def decode(self, token_ids: List[Int]) raises -> String:
+
+        return self.decode(Span[Int](token_ids))
 
     def pretokenize[
         mut: Bool,
@@ -662,22 +667,22 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         for id in ids:
             if id < 0 or id >= n_tokens:
                 raise Error("token ID out of range: " + String(id))
-            total += spans[id].length
+            total += spans[unsafe_offset=id].length
         if total == 0:
             return String("")
 
         var result = String(unsafe_uninit_length=total)
 
         var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
-        var ptr = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var ptr = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
 
         var write_offset: Int = 0
         for id in ids:
-            var n = spans[id].length
+            var n = spans[unsafe_offset=id].length
             if n > 0:
-                memcpy(
-                    dest=dst + write_offset,
-                    src=ptr + spans[id].offset,
+                unsafe_memcpy(
+                    dest=dst.unsafe_offset(write_offset),
+                    src=ptr.unsafe_offset(spans[unsafe_offset=id].offset),
                     count=n,
                 )
                 write_offset += n
@@ -703,20 +708,20 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         for id in ids:
             if id < 0 or id >= n_tokens:
                 raise Error("token ID out of range: " + String(id))
-            total += spans[id].length
+            total += spans[unsafe_offset=id].length
         if total == 0:
             return ByteArray()
         var result = ByteArray(capacity=total)
         result.resize(total, 0)
         var dst = result.unsafe_ptr()
-        var src = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var src = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
         var write_offset: Int = 0
         for id in ids:
-            var n = spans[id].length
+            var n = spans[unsafe_offset=id].length
             if n > 0:
-                memcpy(
-                    dest=dst + write_offset,
-                    src=src + spans[id].offset,
+                unsafe_memcpy(
+                    dest=dst.unsafe_offset(write_offset),
+                    src=src.unsafe_offset(spans[unsafe_offset=id].offset),
                     count=n,
                 )
                 write_offset += n
@@ -727,14 +732,14 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         if id < 0 or id >= len(self.token_table):
             raise Error("token ID out of range: " + String(id))
         var spans = self.token_table.arena.spans.unsafe_ptr()
-        var n = spans[id].length
+        var n = spans[unsafe_offset=id].length
         if n == 0:
             return ByteArray()
-        var off = spans[id].offset
-        var ptr = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var off = spans[unsafe_offset=id].offset
+        var ptr = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
         var result = ByteArray(capacity=n)
         result.resize(n, 0)
-        memcpy(dest=result.unsafe_ptr(), src=ptr + off, count=n)
+        unsafe_memcpy(dest=result.unsafe_ptr(), src=ptr.unsafe_offset(off), count=n)
         return result^
 
     def decode_with_offsets[
@@ -751,20 +756,20 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         for id in ids:
             if id < 0 or id >= n_tokens:
                 raise Error("token ID out of range: " + String(id))
-            total += spans[id].length
+            total += spans[unsafe_offset=id].length
         if total == 0:
             return String("")
         var result = String(unsafe_uninit_length=total)
         var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
-        var ptr = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var ptr = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
         var write_offset: Int = 0
         for id in ids:
-            var n = spans[id].length
+            var n = spans[unsafe_offset=id].length
 
             starts.append(write_offset)
             if n > 0:
-                memcpy(
-                    dest=dst + write_offset, src=ptr + spans[id].offset, count=n
+                unsafe_memcpy(
+                    dest=dst.unsafe_offset(write_offset), src=ptr.unsafe_offset(spans[unsafe_offset=id].offset), count=n
                 )
                 write_offset += n
             ends.append(write_offset)
@@ -774,12 +779,12 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
         var result = List[ByteArray](capacity=len(self.token_table))
         var spans = self.token_table.arena.spans.unsafe_ptr()
-        var ptr = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var ptr = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
         for i in range(len(self.token_table)):
-            var n = spans[i].length
+            var n = spans[unsafe_offset=i].length
             var bytes = ByteArray(capacity=n)
             bytes.resize(n, 0)
-            memcpy(dest=bytes.unsafe_ptr(), src=ptr + spans[i].offset, count=n)
+            unsafe_memcpy(dest=bytes.unsafe_ptr(), src=ptr.unsafe_offset(spans[unsafe_offset=i].offset), count=n)
             result.append(bytes^)
         return result^
 
@@ -791,7 +796,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         var raw = self.token_table.arena.bytes.unsafe_ptr()
         var result = String(capacity=span.length * 3)
         for i in range(span.length):
-            result += chr(self.byte_to_cp[Int(raw[span.offset + i])])
+            result += chr(self.byte_to_cp[Int(raw[unsafe_offset=span.offset + i])])
         return result^
 
     def encode_single_token[
@@ -941,20 +946,20 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
     def save_tiktoken(mut self, path: String) raises:
 
         var spans = self.token_table.arena.spans.unsafe_ptr()
-        var pool = self.token_table.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var pool = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
         with open(path, "w") as f:
             for token_id in range(len(self.token_table)):
                 if token_id in self.inverse_special:
                     continue
 
-                var span = spans[token_id]
+                var span = spans[unsafe_offset=token_id]
                 if span.length == 0:
                     continue
                 var raw = ByteArray(capacity=span.length)
                 raw.resize(span.length, 0)
-                memcpy(
+                unsafe_memcpy(
                     dest=raw.unsafe_ptr(),
-                    src=pool + span.offset,
+                    src=pool.unsafe_offset(span.offset),
                     count=span.length,
                 )
                 var encoded = b64encode(Span[Byte](raw))
@@ -1023,7 +1028,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
 @always_inline
 def merge_inplace(
-    buf: UnsafePointer[Int, MutAnyOrigin],
+    buf: Pointer[Int, MutAnyOrigin],
     n: Int,
     a: Int,
     b: Int,
@@ -1033,13 +1038,13 @@ def merge_inplace(
     var w = 0
     var i = 0
     while i < n:
-        if i < n - 1 and buf[i] == a and buf[i + 1] == b:
+        if i < n - 1 and buf[unsafe_offset=i] == a and buf[unsafe_offset=i + 1] == b:
 
-            buf[w] = m
+            buf[unsafe_offset=w] = m
             i += 2
         else:
 
-            buf[w] = buf[i]
+            buf[unsafe_offset=w] = buf[unsafe_offset=i]
             i += 1
         w += 1
     return w

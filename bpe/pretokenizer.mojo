@@ -1,5 +1,5 @@
 from std.bit import pop_count
-from std.memory import memcmp
+from std.memory import unsafe_memcmp
 from bpe.unicode_tables import (
     is_letter,
     is_digit,
@@ -23,18 +23,18 @@ def utf8_byte_length(lead: UInt8) -> Int:
 @always_inline
 def decode_codepoint[
     origin: Origin, //
-](ptr: UnsafePointer[UInt8, origin], length: Int) -> Int:
+](ptr: Pointer[UInt8, origin], length: Int) -> Int:
 
-    var b0 = Int(ptr.load(0))
+    var b0 = Int(ptr.unsafe_load(0))
     if length == 1:
         return b0
-    var b1 = Int(ptr.load(1))
+    var b1 = Int(ptr.unsafe_load(1))
     if length == 2:
         return ((b0 & 0x1F) << 6) | (b1 & 0x3F)
-    var b2 = Int(ptr.load(2))
+    var b2 = Int(ptr.unsafe_load(2))
     if length == 3:
         return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F)
-    var b3 = Int(ptr.load(3))
+    var b3 = Int(ptr.unsafe_load(3))
     return (
         ((b0 & 0x07) << 18)
         | ((b1 & 0x3F) << 12)
@@ -113,7 +113,7 @@ def _swar_letter_run[
     var consumed = 0
     var j = i
     while j + 8 <= n:
-        var w: UInt64 = (p8 + j).bitcast[UInt64]()[]
+        var w: UInt64 = (p8.unsafe_offset(j)).unsafe_bitcast[UInt64]()[]
         var nl = ~_letters8(w) & UInt64(0x8080808080808080)
         if nl != 0:
             var lsb = nl & (UInt64(0) - nl)
@@ -145,7 +145,7 @@ def is_ws_at[
             return 1
         return 0
     var cplen = utf8_byte_length(lead)
-    if is_whitespace(decode_codepoint(span.unsafe_ptr() + pos, cplen)):
+    if is_whitespace(decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)):
         return cplen
     return 0
 
@@ -236,7 +236,7 @@ comptime O200K_ID_TO_BYTE = SIMD[DType.int32, 256](
 
 from bpe.shared import IntArray, ByteArray, TokenSpan, ByteSpanArena
 
-struct WordCounts(ImplicitlyCopyable & Movable):
+struct WordCounts(ImplicitlyCopyable):
 
     comptime FNV_offset_basis = UInt64(0xCBF29CE484222325)
 
@@ -285,17 +285,17 @@ struct WordCounts(ImplicitlyCopyable & Movable):
 
         for e in range(self.n_entries):
             var h = Self._fnv1a64(
-                bp + self.arena.spans[e].offset, self.arena.spans[e].length
+                bp.unsafe_offset(self.arena.spans[e].offset), self.arena.spans[e].length
             )
             var idx = Int(h & UInt64(new_cap - 1))
 
-            while nsp[idx] != 0:
+            while nsp[unsafe_offset=idx] != 0:
                 idx = (idx + 1) & (new_cap - 1)
-            nsp[idx] = e + 1
+            nsp[unsafe_offset=idx] = e + 1
 
     def add[
         origin: Origin, //
-    ](mut self, ptr: UnsafePointer[UInt8, origin], length: Int):
+    ](mut self, ptr: Pointer[UInt8, origin], length: Int):
 
         if length == 0:
             return
@@ -306,29 +306,29 @@ struct WordCounts(ImplicitlyCopyable & Movable):
         var slot_cap = self.slot_cap
         var sp = self.slots.unsafe_ptr()
         var spans_ptr = self.arena.spans.unsafe_ptr()
-        var bytes_ptr = self.arena.bytes.unsafe_ptr().as_noalias_ptr()
+        var bytes_ptr = self.arena.bytes.unsafe_ptr().unsafe_as_noalias()
         var counts_ptr = self.counts.unsafe_ptr()
         var idx = Int(h & UInt64(slot_cap - 1))
-        while sp[idx] != 0:
-            var e = sp[idx] - 1
+        while sp[unsafe_offset=idx] != 0:
+            var e = sp[unsafe_offset=idx] - 1
             if (
-                spans_ptr[e].length == length
-                and memcmp(
-                    bytes_ptr + spans_ptr[e].offset,
+                spans_ptr[unsafe_offset=e].length == length
+                and unsafe_memcmp(
+                    bytes_ptr.unsafe_offset(spans_ptr[unsafe_offset=e].offset),
                     ptr,
                     length,
                 )
                 == 0
             ):
 
-                counts_ptr[e] = counts_ptr[e] + 1
+                counts_ptr[unsafe_offset=e] = counts_ptr[unsafe_offset=e] + 1
                 return
 
             idx = (idx + 1) & (slot_cap - 1)
 
         var e = self.n_entries
         _ = self.arena.add(ptr, length)
-        sp[idx] = e + 1
+        sp[unsafe_offset=idx] = e + 1
         self.counts.append(1)
         self.n_entries += 1
 
@@ -338,23 +338,23 @@ struct WordCounts(ImplicitlyCopyable & Movable):
 
     def add[
         origin: Origin, //
-    ](mut self, start: UnsafePointer[UInt8, origin], pos: Int, length: Int):
+    ](mut self, start: Pointer[UInt8, origin], pos: Int, length: Int):
 
-        self.add(start + pos, length)
+        self.add(start.unsafe_offset(pos), length)
 
     @staticmethod
     @always_inline
     def _fnv1a64[
         origin: Origin, //
-    ](ptr: UnsafePointer[UInt8, origin], n: Int) -> UInt64:
+    ](ptr: Pointer[UInt8, origin], n: Int) -> UInt64:
 
         var h: UInt64 = Self.FNV_offset_basis
         for i in range(n):
-            h ^= UInt64(ptr[i])
+            h ^= UInt64(ptr[unsafe_offset=i])
             h *= Self.FNV_prime
         return h
 
-trait PreTokenizer(Movable & Defaultable & ImplicitlyDeletable & Writable):
+trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
 
     comptime byte_map: ByteMapping
 
@@ -521,7 +521,7 @@ struct GPT2Pretokenizer(PreTokenizer):
                     break
             else:
                 var cur_len = utf8_byte_length(b)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_letter(cur_cp):
                     found = True
                     i += cur_len
@@ -554,7 +554,7 @@ struct GPT2Pretokenizer(PreTokenizer):
                     break
             else:
                 var cur_len = utf8_byte_length(b)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_digit(cur_cp):
                     found = True
                     i += cur_len
@@ -586,7 +586,7 @@ struct GPT2Pretokenizer(PreTokenizer):
                 i += 1
             else:
                 var cur_len = utf8_byte_length(b)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_whitespace(cur_cp) or is_letter_or_digit(cur_cp):
                     break
                 found = True
@@ -653,8 +653,8 @@ struct GPT2Pretokenizer(PreTokenizer):
         while pos < n:
             var best_len = GPT2Pretokenizer._best_match(span, pos)
             if best_len == 0:
-                best_len = utf8_byte_length(sp[pos])
-            counts.add(sp + pos, best_len)
+                best_len = utf8_byte_length(sp[unsafe_offset=pos])
+            counts.add(sp.unsafe_offset(pos), best_len)
             pos += best_len
 
     def write_to[T: Writer](self, mut writer: T):
@@ -749,7 +749,7 @@ struct GPT4Pretokenizer[
                 i += 1
         else:
             var cplen = utf8_byte_length(lead)
-            var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+            var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
             if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
                 i += cplen
         var found_letters = False
@@ -767,7 +767,7 @@ struct GPT4Pretokenizer[
                     break
             else:
                 var cur_len = utf8_byte_length(b)
-                var cur_cp = decode_codepoint(span.unsafe_ptr() + i, cur_len)
+                var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_letter(cur_cp):
                     found_letters = True
                     i += cur_len
@@ -796,7 +796,7 @@ struct GPT4Pretokenizer[
                     break
             else:
                 var cplen = utf8_byte_length(b)
-                var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+                var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
                 if is_digit(cp):
                     count += 1
                     i += cplen
@@ -828,7 +828,7 @@ struct GPT4Pretokenizer[
                 i += 1
             else:
                 var cplen = utf8_byte_length(b)
-                var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+                var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
                 if is_whitespace(cp) or is_letter_or_digit(cp):
                     break
                 found_punct = True
@@ -874,7 +874,7 @@ struct GPT4Pretokenizer[
                 return 1
             return 0
         var cplen = utf8_byte_length(b)
-        if is_lower_like(decode_codepoint(span.unsafe_ptr() + pos, cplen)):
+        if is_lower_like(decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)):
             return cplen
         return 0
 
@@ -891,7 +891,7 @@ struct GPT4Pretokenizer[
                 return 1
             return 0
         var cplen = utf8_byte_length(b)
-        if is_upper_like(decode_codepoint(span.unsafe_ptr() + pos, cplen)):
+        if is_upper_like(decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)):
             return cplen
         return 0
 
@@ -909,7 +909,7 @@ struct GPT4Pretokenizer[
                 return 1
             return 0
         var cplen = utf8_byte_length(lead)
-        var cp = decode_codepoint(span.unsafe_ptr() + pos, cplen)
+        var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)
         if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
             return cplen
         return 0
@@ -1031,7 +1031,7 @@ struct GPT4Pretokenizer[
             else:
                 var lead = b
                 var cplen = utf8_byte_length(lead)
-                var cp = decode_codepoint(span.unsafe_ptr() + i, cplen)
+                var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
                 if is_whitespace(cp) or is_letter_or_digit(cp):
                     break
                 found_punct = True
@@ -1170,8 +1170,8 @@ struct GPT4Pretokenizer[
         while pos < n:
             var best_len = Self._best_match(span, pos)
             if best_len == 0:
-                best_len = utf8_byte_length(sp[pos])
-            counts.add(sp + pos, best_len)
+                best_len = utf8_byte_length(sp[unsafe_offset=pos])
+            counts.add(sp.unsafe_offset(pos), best_len)
             pos += best_len
 
     def write_to[T: Writer](self, mut writer: T):

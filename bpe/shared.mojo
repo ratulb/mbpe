@@ -1,16 +1,10 @@
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 comptime IntArray = List[Int]
 comptime ByteArray = List[Byte]
 
 @fieldwise_init
-struct TokenSpan(
-    ImplicitlyCopyable
-    & Movable
-    & TrivialRegisterPassable
-    & Equatable
-    & Writable
-):
+struct TokenSpan(TrivialRegisterPassable & Equatable & Writable):
 
     var offset: Int
     var length: Int
@@ -24,7 +18,7 @@ struct TokenSpan(
             + String(")")
         )
 
-struct ByteSpanArena(ImplicitlyCopyable & Movable & Sized & Writable):
+struct ByteSpanArena(ImplicitlyCopyable & Sized & Writable):
 
     var bytes: ByteArray
     var spans: List[TokenSpan]
@@ -70,12 +64,16 @@ struct ByteSpanArena(ImplicitlyCopyable & Movable & Sized & Writable):
     @always_inline
     def add[
         origin: Origin, //
-    ](mut self, ptr: UnsafePointer[UInt8, origin], length: Int) -> Int:
+    ](mut self, ptr: Pointer[UInt8, origin], length: Int) -> Int:
 
         var idx = len(self.spans)
         var off = len(self.bytes)
         self.bytes.resize(off + length, 0)
-        memcpy(dest=self.bytes.unsafe_ptr() + off, src=ptr, count=length)
+        unsafe_memcpy(
+            dest=self.bytes.unsafe_ptr().unsafe_offset(off),
+            src=ptr,
+            count=length,
+        )
         self.spans.append(TokenSpan(off, length))
         return idx
 
