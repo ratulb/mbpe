@@ -1,10 +1,11 @@
 from bpe.tokenizer import BPETokenizer
 from bpe.pretokenizer import GPT2Pretokenizer, GPT4Pretokenizer, PreTokenizer, ByteMapping
 from bpe.shared import ByteArray
+from bpe.tokenizer_trait import Tokenizer
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, TestSuite
 from std.base64 import b64decode
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 from std.python import Python
 
@@ -26,8 +27,12 @@ def bytes_of(text: String) -> ByteArray:
 def concat_bytes(a: ByteArray, b: ByteArray) raises -> ByteArray:
     var result = ByteArray(capacity=len(a) + len(b))
     result.resize(len(a) + len(b), 0)
-    memcpy(dest=result.unsafe_ptr(), src=a.unsafe_ptr(), count=len(a))
-    memcpy(dest=result.unsafe_ptr() + len(a), src=b.unsafe_ptr(), count=len(b))
+    unsafe_memcpy(dest=result.unsafe_ptr(), src=a.unsafe_ptr(), count=len(a))
+    unsafe_memcpy(
+        dest=result.unsafe_ptr().unsafe_offset(len(a)),
+        src=b.unsafe_ptr(),
+        count=len(b),
+    )
     return result^
 
 
@@ -755,6 +760,29 @@ def test_special_tokens_gpt2_auto_register() raises:
     assert_equal(len(loaded.special_bytes), 1)
     assert_equal(loaded.special_bytes["<|endoftext|>"], 50256)
     assert_equal(loaded.decode_single_token_bytes(50256), bytes_of("<|endoftext|>"))
+
+
+def _roundtrip_via_trait[T: Tokenizer](tok: T, text: String) raises -> String:
+    """Exercise a tokenizer purely through the `Tokenizer` trait."""
+    var ids = tok.encode(text)
+    assert_true(len(ids) > 0)
+    return tok.decode(ids)
+
+
+def test_tokenizer_trait_conformance() raises:
+    """BPETokenizer satisfies the minimal `Tokenizer` trait (all 3 PTs)."""
+    var text = String("Hello world! 123")
+    var corpus = List[String]()
+    corpus.append(text)
+    var t2 = BPETokenizer[GPT2Pretokenizer]()
+    t2.train(corpus, 300)
+    assert_equal(_roundtrip_via_trait(t2^, text), text)
+    var t4s = BPETokenizer[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]()
+    t4s.train(corpus, 300)
+    assert_equal(_roundtrip_via_trait(t4s^, text), text)
+    var t4h = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
+    t4h.train(corpus, 300)
+    assert_equal(_roundtrip_via_trait(t4h^, text), text)
 
 
 def main() raises:
