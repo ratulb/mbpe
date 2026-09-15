@@ -372,16 +372,16 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
 
     def split_view[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
+    ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
-        var result = List[StringSlice[origin]]()
+        var result = List[StringSpan[origin]]()
         result.reserve(1)
         result.append(text)
         return result^
 
     def split[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin]) raises -> List[String]:
+    ](self, text: StringSpan[origin]) raises -> List[String]:
 
         var views = self.split_view(text)
         var result = List[String](capacity=len(views))
@@ -391,7 +391,7 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
 
     def count_words[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+    ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
         ref views = self.split_view(text)
         for v in views:
@@ -623,9 +623,9 @@ struct GPT2Pretokenizer(PreTokenizer):
 
     def split_view[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
+    ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
-        var result = List[StringSlice[origin]]()
+        var result = List[StringSpan[origin]]()
         var n = text.byte_length()
         if n == 0:
             return result^
@@ -636,13 +636,13 @@ struct GPT2Pretokenizer(PreTokenizer):
             if best_len == 0:
                 best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]
-            result.append(StringSlice(unsafe_from_utf8=byte_span))
+            result.append(StringSpan(unsafe_from_utf8=byte_span))
             pos += best_len
         return result^
 
     def count_words[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+    ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
         var n = text.byte_length()
         if n == 0:
@@ -1140,9 +1140,9 @@ struct GPT4Pretokenizer[
 
     def split_view[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
+    ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
-        var result = List[StringSlice[origin]]()
+        var result = List[StringSpan[origin]]()
         var n = text.byte_length()
         if n == 0:
             return result^
@@ -1153,13 +1153,13 @@ struct GPT4Pretokenizer[
             if best_len == 0:
                 best_len = utf8_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]
-            result.append(StringSlice(unsafe_from_utf8=byte_span))
+            result.append(StringSpan(unsafe_from_utf8=byte_span))
             pos += best_len
         return result^
 
     def count_words[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin], mut counts: WordCounts) raises:
+    ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
         var n = text.byte_length()
         if n == 0:

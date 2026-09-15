@@ -8,6 +8,7 @@
 A **high-performance**, trainable, tiktoken-compatible BPE tokenizer written in **Mojo**.
 The compile-time `PreTokenizer` trait enables GPT-2, GPT-4, GPT-4o and custom tokenization pipelines without changing the core tokenizer.
 
+
 ```python
 import mbpe
 
@@ -37,7 +38,8 @@ print(tokenizer.decode(tokens))        # "hello world"
 > **Across all three OpenAI encodings, native Mojo is consistently the fastest implementation for both encoding and decoding, while the Python bindings substantially outperform Python tiktoken**.
 
 <img src="docs/assets/benchmark_chart.svg" width="800" alt="Encode/decode throughput by encoding">
-*Environment: AMD EPYC 9B45, 4 cores, 14Gi RAM, Debian GNU/Linux 13 (trixie). Mojo 1.0.0, Python 3.14.7, Rust 1.98.1, tiktoken 0.14.0.*
+
+*Environment: AMD EPYC 9B45, 4 cores, 15Gi RAM, Debian GNU/Linux 12 (bookworm). Mojo 1.0.0, Python 3.14.7, Rust 1.98.1, tiktoken 0.14.0.*
 
 ---
 
