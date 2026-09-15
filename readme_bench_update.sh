@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Single script: benchmark all implementations on a corpus, update README tables.
+# Single script: benchmark all implementations on a corpus, regenerate the
+# benchmark chart + README environment line.
 # Usage:  bash readme_bench_update.sh [corpus_path]
 #
 # Default corpus: benchmarks/corpus_5MB.txt
 # Results written to benchmarks/results/{native,mbpe,tiktoken,tiktoken-rs,training}.json
+# Chart written to docs/assets/benchmark_chart.svg (embedded in README.md).
 #
 # Self-sufficient: regenerates gitignored corpora when the requested one is
 # missing, and installs a benchmark-only Rust toolchain under /tmp (or
@@ -76,7 +78,8 @@ echo "  5/5  Mojo training (GPT4, 4 vocab sizes)..."
 BPE_CORPUS="$CORPUS" pixi run mojo -I . benchmarks/bm_train.mojo > "$RESULTS/training.json"
 
 echo ""
-echo "=== Updating README.md ==="
+echo "=== Updating README chart + environment line ==="
+pixi run -e dev python scripts/generate_benchmark_chart.py
 bash scripts/update_readme_benchmarks.sh
 
 echo ""

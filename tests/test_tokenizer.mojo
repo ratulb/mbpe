@@ -151,7 +151,7 @@ def test_encode_single_token() raises:
     var tok = BPETokenizer()
     tok.train(corpus, 300)
 
-    var token_id = tok.encode_single_token(StringSlice("hello"))
+    var token_id = tok.encode_single_token(StringSpan("hello"))
     assert_true(token_id >= 0)
 
     var decoded = tok.decode_single_token_bytes(token_id)
@@ -159,7 +159,7 @@ def test_encode_single_token() raises:
 
     var raised = False
     try:
-        _ = tok.encode_single_token(StringSlice("\u0000nonexistent\u0000"))
+        _ = tok.encode_single_token(StringSpan("\u0000nonexistent\u0000"))
     except:
         raised = True
     assert_true(raised)

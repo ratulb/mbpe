@@ -531,7 +531,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         mut: Bool,
         //,
         origin: Origin[mut=mut],
-    ](self, text: StringSlice[origin]) raises -> IntArray:
+    ](self, text: StringSpan[origin]) raises -> IntArray:
 
         if text.byte_length() == 0:
             return IntArray()
@@ -568,7 +568,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
     def encode(self, text: String) raises -> List[Int]:
 
-        var slice: StringSlice = text
+        var slice: StringSpan = text
         return self.encode(slice)
 
     def decode(self, token_ids: List[Int]) raises -> String:
@@ -579,7 +579,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         mut: Bool,
         //,
         origin: Origin[mut=mut],
-    ](self, text: StringSlice[origin]) raises -> List[StringSlice[origin]]:
+    ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
         return self.pt.split_view(text)
 
@@ -587,7 +587,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         mut: Bool,
         //,
         origin: Origin[mut=mut],
-    ](self, text: StringSlice[origin]) raises -> IntArray:
+    ](self, text: StringSpan[origin]) raises -> IntArray:
 
         if len(self.special_bytes) == 0:
             return self.encode_ordinary(text)
@@ -636,7 +636,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
                         next_special = found_at
                 if next_special > start:
 
-                    var seg = StringSlice(
+                    var seg = StringSpan(
                         unsafe_from_utf8=bytes[start:next_special]
                     )
                     for id in self.encode_ordinary(seg):
@@ -647,7 +647,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
                     pos += 1
                 else:
 
-                    var seg = StringSlice(unsafe_from_utf8=bytes[start:n])
+                    var seg = StringSpan(unsafe_from_utf8=bytes[start:n])
                     for id in self.encode_ordinary(seg):
                         result.append(id)
                     pos = n
@@ -801,7 +801,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
     def encode_single_token[
         mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSlice[origin]) raises -> Int:
+    ](self, text: StringSpan[origin]) raises -> Int:
 
         for item in self.special_bytes.items():
             if item.key == text:

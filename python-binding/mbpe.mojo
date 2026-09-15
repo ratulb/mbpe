@@ -56,7 +56,7 @@ def _uint8_list_list_to_py_list(data: List[List[UInt8]]) raises -> PythonObject:
 
 def _views_to_py_bytes[
     mut: Bool, //, origin: Origin[mut=mut]
-](views: List[StringSlice[origin]]) raises -> PythonObject:
+](views: List[StringSpan[origin]]) raises -> PythonObject:
     """Copy zero-copy word views into a Python list of bytes objects."""
     var py_vals = List[PythonObject](capacity=len(views))
     for v in views:

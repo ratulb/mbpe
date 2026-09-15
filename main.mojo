@@ -474,7 +474,7 @@ def test_load_o200k_base() raises:
     var tok = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
     tok.load_tiktoken("data/o200k.tiktoken")
 
-    # o200k_base has 199,998 file entries, plus 21 reserved/special IDs (199998-200018)
+    # o200k_base has 199,998 file entries, plus 2 reserved/special IDs (199998-200018)
     assert_equal(len(tok), 200019)
     assert_equal(len(tok.special_bytes), 2)
     assert_equal(tok.special_bytes["<|endoftext|>"], 199999)
