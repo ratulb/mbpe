@@ -127,7 +127,6 @@ def test_basic_roundtrip() raises:
     assert_true(len(ids) > 0)
     assert_equal(tok.decode(ids), "hello world")
 
-
 def test_empty_input() raises:
     var corpus = List[String]()
     corpus.append(String("abc"))

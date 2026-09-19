@@ -17,7 +17,7 @@ Three BPE operations across four implementations:
 | `mojo` | Mojo | Our `BPETokenizer` — 2 pre-tokeniser variants (gpt2, gpt4) × 4 vocab sizes (500, 1000, 2000, 4000) |
 | `tiktoken_py` | Python | OpenAI's `tiktoken` library — `gpt2` + `cl100k_base` encodings |
 | `mbpe_py` | Python | Our Mojo library exposed via Python bindings — `gpt2`, `cl100k`, `o200k` encodings (pre-loaded from `.tiktoken` files) |
-| `tiktoken_rs` | Rust | `tiktoken-rs` crate — `p50k_base` (GPT-2) + `cl100k_base` (GPT-4) |
+| `tiktoken_rs` | Rust | `tiktoken-rs` crate — `r50k_base` (GPT-2) + `cl100k_base` (GPT-4) |
 
 ## Methodology
 
@@ -251,7 +251,7 @@ python benchmarks/build_summary.py
 
 | File | Role |
 |------|------|
-| `benchmark_rust/src/main.rs` | `tiktoken-rs` crate — `p50k_base` + `cl100k_base`, 20 iterations. |
+| `benchmark_rust/src/main.rs` | `tiktoken-rs` crate — `r50k_base` + `cl100k_base`, 20 iterations. |
 | `benchmark_rust/Cargo.toml` | Rust project manifest. |
 
 ### Data processing

@@ -67,9 +67,9 @@ fn main() {
 
     let n_iters = 3;
 
-    // p50k_base (GPT-2)
-    let bpe_p50k = tiktoken_rs::p50k_base().unwrap();
-    println!("{}", bench_encoding("gpt2", &bpe_p50k, &text, n_bytes, n_iters));
+    // r50k_base (GPT-2) — must match the r50k rows of the other harnesses
+    let bpe_r50k = tiktoken_rs::r50k_base().unwrap();
+    println!("{}", bench_encoding("gpt2", &bpe_r50k, &text, n_bytes, n_iters));
 
     // cl100k_base (GPT-4)
     let bpe_cl100k = tiktoken_rs::cl100k_base().unwrap();
