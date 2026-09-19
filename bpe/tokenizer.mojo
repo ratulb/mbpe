@@ -536,7 +536,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         if text.byte_length() == 0:
             return IntArray()
 
-        ref words = self.pt.split_view(text)
+        ref words = self.pt.split(text)
 
         var total_bytes = 0
         for word in words:
@@ -581,7 +581,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         origin: Origin[mut=mut],
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
-        return self.pt.split_view(text)
+        return self.pt.split(text)
 
     def encode[
         mut: Bool,
@@ -673,8 +673,8 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
 
         var result = String(unsafe_uninit_length=total)
 
-        var dst = result.as_bytes().unsafe_ptr().unsafe_mut_cast[True]()
-        var ptr = self.token_table.arena.bytes.unsafe_ptr().unsafe_as_noalias()
+        var dst = result.unsafe_ptr_mut()
+        var ptr = self.token_table.arena.bytes.unsafe_ptr()
 
         var write_offset: Int = 0
         for id in ids:

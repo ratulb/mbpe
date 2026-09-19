@@ -36,7 +36,7 @@ IMPLS = [
 ]
 
 # Axis ceilings: first ladder rung >= max * HEADROOM. Ladders divide
-# evenly by 4 (gridlines at max/4 steps). Current data lands on 20/220.
+# evenly by 4 (gridlines at max/4 steps). Current data lands on 20/300.
 ENCODE_LADDER = [5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100]
 DECODE_LADDER = [50, 100, 150, 200, 220, 250, 300, 400, 500]
 HEADROOM = 1.08

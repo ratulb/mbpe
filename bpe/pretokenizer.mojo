@@ -10,7 +10,7 @@ from bpe.unicode_tables import (
 )
 
 @always_inline
-def utf8_byte_length(lead: UInt8) -> Int:
+def utf8_codepoint_byte_length(lead: UInt8) -> Int:
 
     if lead < 0x80:
         return 1
@@ -144,7 +144,7 @@ def is_ws_at[
         if is_ascii_ws_byte(Int(lead)):
             return 1
         return 0
-    var cplen = utf8_byte_length(lead)
+    var cplen = utf8_codepoint_byte_length(lead)
     if is_whitespace(decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)):
         return cplen
     return 0
@@ -370,7 +370,7 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
 
         return rank
 
-    def split_view[
+    def split[
         mut: Bool, //, origin: Origin[mut=mut]
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
@@ -379,21 +379,11 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
         result.append(text)
         return result^
 
-    def split[
-        mut: Bool, //, origin: Origin[mut=mut]
-    ](self, text: StringSpan[origin]) raises -> List[String]:
-
-        var views = self.split_view(text)
-        var result = List[String](capacity=len(views))
-        for v in views:
-            result.append(String(v))
-        return result^
-
     def count_words[
         mut: Bool, //, origin: Origin[mut=mut]
     ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
-        ref views = self.split_view(text)
+        ref views = self.split(text)
         for v in views:
             counts.add(v.as_bytes())
 
@@ -403,7 +393,7 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
 
     @staticmethod
     def special_tokens() -> Dict[String, Int]:
-        ...
+        return Dict[String, Int]()
 
     @staticmethod
     def match_trailing_all_ws[
@@ -520,7 +510,7 @@ struct GPT2Pretokenizer(PreTokenizer):
                 else:
                     break
             else:
-                var cur_len = utf8_byte_length(b)
+                var cur_len = utf8_codepoint_byte_length(b)
                 var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_letter(cur_cp):
                     found = True
@@ -553,7 +543,7 @@ struct GPT2Pretokenizer(PreTokenizer):
                 else:
                     break
             else:
-                var cur_len = utf8_byte_length(b)
+                var cur_len = utf8_codepoint_byte_length(b)
                 var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_digit(cur_cp):
                     found = True
@@ -585,7 +575,7 @@ struct GPT2Pretokenizer(PreTokenizer):
                 found = True
                 i += 1
             else:
-                var cur_len = utf8_byte_length(b)
+                var cur_len = utf8_codepoint_byte_length(b)
                 var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_whitespace(cur_cp) or is_letter_or_digit(cur_cp):
                     break
@@ -621,7 +611,7 @@ struct GPT2Pretokenizer(PreTokenizer):
             return m
         return Self.match_single_ws(span, pos)
 
-    def split_view[
+    def split[
         mut: Bool, //, origin: Origin[mut=mut]
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
@@ -634,7 +624,7 @@ struct GPT2Pretokenizer(PreTokenizer):
         while pos < n:
             var best_len = GPT2Pretokenizer._best_match(span, pos)
             if best_len == 0:
-                best_len = utf8_byte_length(span[pos])
+                best_len = utf8_codepoint_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]
             result.append(StringSpan(unsafe_from_utf8=byte_span))
             pos += best_len
@@ -653,7 +643,7 @@ struct GPT2Pretokenizer(PreTokenizer):
         while pos < n:
             var best_len = GPT2Pretokenizer._best_match(span, pos)
             if best_len == 0:
-                best_len = utf8_byte_length(sp[unsafe_offset=pos])
+                best_len = utf8_codepoint_byte_length(sp[unsafe_offset=pos])
             counts.add(sp.unsafe_offset(pos), best_len)
             pos += best_len
 
@@ -748,7 +738,7 @@ struct GPT4Pretokenizer[
             ) == 0:
                 i += 1
         else:
-            var cplen = utf8_byte_length(lead)
+            var cplen = utf8_codepoint_byte_length(lead)
             var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
             if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
                 i += cplen
@@ -766,7 +756,7 @@ struct GPT4Pretokenizer[
                 else:
                     break
             else:
-                var cur_len = utf8_byte_length(b)
+                var cur_len = utf8_codepoint_byte_length(b)
                 var cur_cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cur_len)
                 if is_letter(cur_cp):
                     found_letters = True
@@ -795,7 +785,7 @@ struct GPT4Pretokenizer[
                 else:
                     break
             else:
-                var cplen = utf8_byte_length(b)
+                var cplen = utf8_codepoint_byte_length(b)
                 var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
                 if is_digit(cp):
                     count += 1
@@ -827,7 +817,7 @@ struct GPT4Pretokenizer[
                 found_punct = True
                 i += 1
             else:
-                var cplen = utf8_byte_length(b)
+                var cplen = utf8_codepoint_byte_length(b)
                 var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
                 if is_whitespace(cp) or is_letter_or_digit(cp):
                     break
@@ -873,7 +863,7 @@ struct GPT4Pretokenizer[
             if 97 <= ib <= 122:
                 return 1
             return 0
-        var cplen = utf8_byte_length(b)
+        var cplen = utf8_codepoint_byte_length(b)
         if is_lower_like(decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)):
             return cplen
         return 0
@@ -890,7 +880,7 @@ struct GPT4Pretokenizer[
             if 65 <= ib <= 90:
                 return 1
             return 0
-        var cplen = utf8_byte_length(b)
+        var cplen = utf8_codepoint_byte_length(b)
         if is_upper_like(decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)):
             return cplen
         return 0
@@ -908,7 +898,7 @@ struct GPT4Pretokenizer[
             ) == 0:
                 return 1
             return 0
-        var cplen = utf8_byte_length(lead)
+        var cplen = utf8_codepoint_byte_length(lead)
         var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(pos), cplen)
         if cp != 0x000A and cp != 0x000D and not is_letter_or_digit(cp):
             return cplen
@@ -1030,7 +1020,7 @@ struct GPT4Pretokenizer[
                 i += 1
             else:
                 var lead = b
-                var cplen = utf8_byte_length(lead)
+                var cplen = utf8_codepoint_byte_length(lead)
                 var cp = decode_codepoint(span.unsafe_ptr().unsafe_offset(i), cplen)
                 if is_whitespace(cp) or is_letter_or_digit(cp):
                     break
@@ -1138,7 +1128,7 @@ struct GPT4Pretokenizer[
                 return m
             return Self.match_single_ws(span, pos)
 
-    def split_view[
+    def split[
         mut: Bool, //, origin: Origin[mut=mut]
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
@@ -1151,7 +1141,7 @@ struct GPT4Pretokenizer[
         while pos < n:
             var best_len = Self._best_match(span, pos)
             if best_len == 0:
-                best_len = utf8_byte_length(span[pos])
+                best_len = utf8_codepoint_byte_length(span[pos])
             var byte_span = span[pos : pos + best_len]
             result.append(StringSpan(unsafe_from_utf8=byte_span))
             pos += best_len
@@ -1170,7 +1160,7 @@ struct GPT4Pretokenizer[
         while pos < n:
             var best_len = Self._best_match(span, pos)
             if best_len == 0:
-                best_len = utf8_byte_length(sp[unsafe_offset=pos])
+                best_len = utf8_codepoint_byte_length(sp[unsafe_offset=pos])
             counts.add(sp.unsafe_offset(pos), best_len)
             pos += best_len
 

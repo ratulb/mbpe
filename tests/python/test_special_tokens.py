@@ -82,3 +82,33 @@ class TestTiktokenInteraction:
             assert "<|endoftext|>" in specials
         finally:
             os.unlink(path)
+
+
+class TestAllowedSpecialNone:
+    """`allowed_special=None` means *none* (per the docstring), not "all"."""
+
+    def test_none_matches_empty_set(self, trained_tok):
+        tok = trained_tok
+        tok.register_special_tokens({"<|endoftext|>": 300})
+        text = "hello <|endoftext|> world"
+        assert tok.encode(
+            text, allowed_special=None, disallowed_special="ignore"
+        ) == tok.encode(text, allowed_special=set(), disallowed_special="ignore")
+
+    def test_none_encodes_specials_as_ordinary(self, trained_tok):
+        tok = trained_tok
+        tok.register_special_tokens({"<|endoftext|>": 300})
+        text = "hello <|endoftext|> world"
+        assert tok.encode(
+            text, allowed_special=None, disallowed_special="ignore"
+        ) == tok.encode_ordinary(text)
+
+    def test_none_raises_on_disallowed(self, trained_tok):
+        tok = trained_tok
+        tok.register_special_tokens({"<|endoftext|>": 300})
+        with pytest.raises(ValueError):
+            tok.encode(
+                "hello <|endoftext|> world",
+                allowed_special=None,
+                disallowed_special="raise",
+            )

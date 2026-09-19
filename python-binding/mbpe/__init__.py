@@ -55,7 +55,7 @@ class _BaseTokenizer:
         registered = self._get_registered_specials()
 
         # ---- normalise allowed_special ----
-        if allowed_special == "all" or allowed_special is None:
+        if allowed_special == "all":
             allowed = set(registered)
         elif isinstance(allowed_special, (set, frozenset, list, tuple)):
             allowed = set(allowed_special)

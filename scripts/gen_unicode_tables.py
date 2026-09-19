@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 r"""Generate `bpe/unicode_tables.mojo` (event-point Unicode class table).
 
-Oracles
--------
-* Primary: Python `regex` module (dev/test-only, Unicode 16.0). This is the
+Authoritative source
+--------------------
+* Python `regex` module (dev/test-only, Unicode 16.0). This is the
   future-proof source used on every run.
-* Transition: the literal if-chains in `bpe/pretokenizer.mojo`. Parsed only
-  while they still exist (i.e. before the swap); if present, their class
-  intervals must match the `regex` oracle exactly, and the emitted table is
-  exhaustively asserted bit-for-bit against them for all ~1.1M codepoints.
+* Historical note: this table replaces the literal if-chains formerly in
+  `bpe/pretokenizer.mojo` (now deleted). The steady state is source-driven:
+  every run derives the table from `regex` below.
 
 The six class bits, one per `is_*` function (see UNICODE_TABLES.md):
 
@@ -19,19 +18,53 @@ The six class bits, one per `is_*` function (see UNICODE_TABLES.md):
     M = 0x10  \p{M}           (combining marks)
     W = 0x20  White_Space
 
+How the whole script works
+--------------------------
+The pre-tokenizer must answer "is codepoint X a letter / digit / lowercase /
+uppercase / mark / whitespace?" for all ~1.1M Unicode codepoints, exactly.
+Storing one mask per codepoint would cost ~1.1 MB of mostly repetition:
+long runs of codepoints share the same 6-bit mask, which only changes at a
+few thousand positions. So this script builds an *event-point table*: one
+entry per constant-mask run, as two parallel arrays (`BOUNDS`, run starts;
+`MASKS`, the mask each run introduces). Mojo answers any query with a single
+binary search over `BOUNDS` (see `UNICODE_EVENT_POINTS.md` for the worked
+example). The pipeline, in order:
+
+1. `regex_intervals` — ask the authoritative source (Python `regex`,
+   Unicode 16.0) which codepoints belong to each of the six classes, as
+   merged inclusive intervals. Surrogates (U+D800–U+DFFF) are excluded:
+   they never appear in valid UTF-8, so whatever mask their segment
+   carries is harmless.
+2. `build_table` — collect every interval's `lo` and `hi + 1` as event
+   points (plus 0), sweep them in order, and emit a new entry only where
+   the mask actually changes (coalescing). Result: ~3,200 entries.
+3. `assert_ascii_branches` — the generated Mojo answers `cp < 128` with
+   handwritten fast paths instead of the binary search; this gate proves
+   those branches equal the authoritative source below U+0080 on every
+   run. (`is_whitespace` has no fast path, so it is skipped.)
+4. `emit` — write `bpe/unicode_tables.mojo`: bit constants, the two
+   arrays, the `_class_mask` binary search, the six `is_*` wrappers with
+   their ASCII fast paths, and the three derived predicates
+   (`is_letter_or_digit`, `is_upper_like`, `is_lower_like`), which are
+   computed from a single mask load and need no extra table bits.
+
+Regeneration is idempotent: re-running reproduces the committed table
+byte-for-byte. On a Unicode bump, refresh the dev-env `regex` package and
+re-run — never hand-edit `bpe/unicode_tables.mojo`.
+
 Usage:
-    pixi run --environment dev python scripts/gen_unicode_tables.py [--no-regex]
+    pixi run --environment dev python scripts/gen_unicode_tables.py
 """
 
-import argparse
-import re
 import sys
 from bisect import bisect_right
 
-MAX_CP = 0x110000
-PRETOK = "bpe/pretokenizer.mojo"
-OUT = "bpe/unicode_tables.mojo"
+MAX_CP = 0x110000  # one past U+10FFFF; range(MAX_CP) covers every codepoint
+OUT = "bpe/unicode_tables.mojo"  # generated file: never hand-edit, re-run this script
 
+# The six base classes. Each row is (Mojo function name, authoritative-source
+# `regex` pattern, bit position in the 6-bit mask). The order here fixes the
+# bit assignment used by both the table and the emitted wrappers.
 BASE_FUNCS = (
     ("is_letter", r"\p{L}", 0x01),
     ("is_digit", r"\p{N}", 0x02),
@@ -41,15 +74,9 @@ BASE_FUNCS = (
     ("is_whitespace", r"\p{White_Space}", 0x20),
 )
 
-DERIVED = (
-    ("is_letter_or_digit", "is_letter(cp) or is_digit(cp)"),
-    ("is_upper_like", None),  # emitted with explicit boolean form
-    ("is_lower_like", None),
-)
-
-# Verbatim ASCII fast paths + docstrings, part of the API contract (the swap
-# must be byte-for-byte behavior-preserving).  Used directly once the chains
-# are deleted; while the chains exist they are parsed and must equal these.
+# Verbatim ASCII fast paths + docstrings, part of the API contract. The
+# generator asserts these against the authoritative source below U+0080 on
+# every run (see assert_ascii_branches).
 FUNC_META = {
     "is_letter": (
         "Exact Unicode property membership (generated from Unicode data).",
@@ -81,11 +108,12 @@ FUNC_META = {
 }
 
 BIT_L, BIT_N, BIT_l, BIT_u, BIT_M, BIT_W = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20
-UPPER_LIKE = (BIT_L & ~BIT_l) | BIT_M  # (L & ~l) | M
-LOWER_LIKE = (BIT_L & ~BIT_u) | BIT_M  # (L & ~u) | M
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+# Small interval utilities. Everything here works on inclusive (lo, hi)
+# codepoint ranges; merging keeps the per-class interval lists minimal so
+# the binary searches in mask_at/_in_intervals stay cheap.
 
 def merge_intervals(intervals):
     """Coalesce overlapping/adjacent inclusive (lo, hi) intervals."""
@@ -109,53 +137,13 @@ def to_intervals(cps):
     return out
 
 
-def parse_chain_body(body):
-    """Return (docstring, ascii_expr, chain_intervals) from a function body."""
-    m = re.search(r'"""([\s\S]*?)"""', body)
-    doc = m.group(1) if m else ""
-    rest = body[m.end():] if m else body
-
-    ascii_expr = None
-    m = re.search(r"if cp < 128:\n\s*return (.+)", rest)
-    if m:
-        ascii_expr = m.group(1).strip()
-
-    chain = ""
-    m = re.search(r"return \(\n([\s\S]*?)\n    \)", rest)
-    if m:
-        chain = m.group(1)
-
-    intervals = []
-    for lo, hi in re.findall(r"0x([0-9A-Fa-f]+) <= cp and cp <= 0x([0-9A-Fa-f]+)", chain):
-        intervals.append((int(lo, 16), int(hi, 16)))
-    for v in re.findall(r"cp == 0x([0-9A-Fa-f]+)", chain):
-        intervals.append((int(v, 16), int(v, 16)))
-
-    if ascii_expr is not None:
-        ns = {}
-        for cp in range(128):
-            if eval(ascii_expr, {"__builtins__": {}}, {"cp": cp}):
-                intervals.append((cp, cp))
-
-    return doc, ascii_expr, merge_intervals(intervals)
-
-
-def parse_chains(src):
-    """Extract {name: (doc, ascii_expr, intervals)} for the base functions."""
-    names = "|".join(name for name, _, _ in BASE_FUNCS)
-    pat = re.compile(
-        r"@always_inline\ndef (%s)\(cp: Int\) -> Bool:\n([\s\S]*?)(?=\n@always_inline\ndef |\n@always_inline\ndef|\Z)"
-        % names
-    )
-    out = {}
-    for m in pat.finditer(src):
-        name, body = m.group(1), m.group(2)
-        out[name] = parse_chain_body(body)
-    return out
-
-
 def regex_intervals(pattern):
-    """Codepoints matching `pattern`, as merged intervals (single pass)."""
+    """Codepoints matching `pattern`, as merged intervals (single pass).
+
+    Scans every codepoint once through the authoritative `regex` tables and
+    folds the matches into intervals. Surrogates are skipped: they are not
+    valid UTF-8, so no query can ever depend on their mask.
+    """
     import regex
 
     chars = [chr(cp) for cp in range(MAX_CP) if not (0xD800 <= cp <= 0xDFFF)]
@@ -163,13 +151,28 @@ def regex_intervals(pattern):
 
 
 # ── table construction ───────────────────────────────────────────────────
+# The event-point core (pipeline step 2). Turns per-class interval sets into
+# the single (BOUNDS, MASKS) table the Mojo side binary-searches.
 
 def build_table(class_intervals):
-    """class_intervals: {name: [(lo, hi), ...]}. Returns (bounds, masks)."""
+    """class_intervals: {name: [(lo, hi), ...]}. Returns (bounds, masks).
+
+    Every inclusive interval (lo, hi) turns membership on at lo and off just
+    after hi, so each contributes two event points: lo and hi + 1 (the +1
+    converts inclusive ranges to half-open segments that tile the space with
+    no gaps). Sweeping the sorted points and emitting only mask *changes*
+    is what compresses ~1.1M codepoints into a few thousand entries.
+    """
     los = {name: [lo for lo, hi in iv] for name, iv in class_intervals.items()}
     intervals = {name: iv for name, iv in class_intervals.items()}
 
     def mask_at(cp):
+        # The mask at one point: OR in each class's bit if cp falls inside
+        # one of that class's intervals (binary search per class via
+        # bisect_right on the interval starts). Correct at any point, but
+        # only *evaluated* at segment starts, where no class boundary can
+        # fall inside the segment — so every codepoint in the segment
+        # shares the result by construction.
         m = 0
         for name, _, bit in BASE_FUNCS:
             iv = intervals[name]
@@ -178,7 +181,8 @@ def build_table(class_intervals):
                 m |= bit
         return m
 
-    points = {0}
+    points = {0}  # 0 anchors the first segment: codepoints below the first
+    # real boundary resolve to mask 0 instead of falling off the table.
     for iv in intervals.values():
         for lo, hi in iv:
             points.add(lo)
@@ -188,10 +192,13 @@ def build_table(class_intervals):
     bounds, masks, prev = [], [], None
     for a, b in zip(points, points[1:]):
         m = mask_at(a)
-        if m != prev:
-            bounds.append(a)
+        if m != prev:  # coalesce: same mask as the previous segment means
+            bounds.append(a)  # no new run starts here — skip the entry.
             masks.append(m)
             prev = m
+    # The trailing segment (last point through end of space) has no right
+    # neighbor to compare against, so it is handled explicitly: same
+    # coalescing rule, with the run extending implicitly to U+10FFFF.
     m = mask_at(points[-1])
     if m != prev:
         bounds.append(points[-1])
@@ -200,37 +207,15 @@ def build_table(class_intervals):
     return bounds, masks
 
 
-def assert_equivalence(bounds, masks, chain, classes):
-    """Exhaustively assert table bits == chain results for all codepoints."""
-    def mask_of(cp):
-        return masks[bisect_right(bounds, cp) - 1]
-
-    def in_class(name, cp):
-        iv = chain[name][2]
-        i = bisect_right([lo for lo, _ in iv], cp) - 1
-        return i >= 0 and iv[i][1] >= cp
-
-    for cp in range(MAX_CP):
-        m = mask_of(cp)
-        for name, _, bit in BASE_FUNCS:
-            if bool(m & bit) != in_class(name, cp):
-                sys.exit(
-                    f"MISMATCH at U+{cp:04X}: {name} chain={in_class(name, cp)} "
-                    f"table={bool(m & bit)}"
-                )
-        old_upper = (in_class("is_letter", cp) and not in_class("is_lowercase", cp)) or in_class("is_mark", cp)
-        table_upper = (bool(m & BIT_L) and not bool(m & BIT_l)) or bool(m & BIT_M)
-        if table_upper != old_upper:
-            sys.exit(f"MISMATCH is_upper_like at U+{cp:04X}")
-        old_lower = (in_class("is_letter", cp) and not in_class("is_uppercase", cp)) or in_class("is_mark", cp)
-        table_lower = (bool(m & BIT_L) and not bool(m & BIT_u)) or bool(m & BIT_M)
-        if table_lower != old_lower:
-            sys.exit(f"MISMATCH is_lower_like at U+{cp:04X}")
-    print(f"equivalence asserted over all {MAX_CP} codepoints")
-
-
 def assert_ascii_branches(meta, classes):
-    """Hardcoded ASCII fast paths must match the oracle below U+0080.
+    """Hardcoded ASCII fast paths must match the authoritative source below U+0080.
+
+    Pipeline step 3 and the run's only correctness gate: the emitted Mojo
+    short-circuits `cp < 128` with handwritten branches, bypassing the table
+    on the hottest inputs. For each class, the set of codepoints below 128
+    accepted by the branch expression must equal the set the authoritative
+    intervals imply; any drift (e.g. someone edits a range) aborts the run
+    instead of emitting a subtly wrong table.
 
     `classes` maps name -> merged intervals.  `is_whitespace` has no ASCII
     fast path (the table is correct for all codepoints), so it is skipped.
@@ -239,24 +224,31 @@ def assert_ascii_branches(meta, classes):
         _doc, ascii_expr = meta[name]
         if ascii_expr is None:
             continue
-        oracle = {cp for cp in range(128)
-                  if _in_intervals(cp, classes[name])}
+        expected = {cp for cp in range(128)
+                    if _in_intervals(cp, classes[name])}
         branch = {cp for cp in range(128)
                   if eval(ascii_expr, {"__builtins__": {}}, {"cp": cp})}
-        if oracle != branch:
+        if expected != branch:
             sys.exit(
-                f"ASCII branch drift for {name}: oracle {sorted(oracle)} "
+                f"ASCII branch drift for {name}: authoritative source {sorted(expected)} "
                 f"!= branch {sorted(branch)}"
             )
-    print("ASCII fast paths == oracle below U+0080")
+    print("ASCII fast paths == authoritative source below U+0080")
 
 
 def _in_intervals(cp, iv):
+    # Point query used by the ASCII gate: is cp inside any interval of the
+    # merged list? bisect_right finds the last interval starting at or
+    # before cp; cp is a member iff it does not end before cp.
     i = bisect_right([lo for lo, _ in iv], cp) - 1
     return i >= 0 and iv[i][1] >= cp
 
 
 # ── emission ─────────────────────────────────────────────────────────────
+# Pipeline step 4: render the Mojo source. The emitted `_class_mask` is a
+# hand-rolled binary search for the greatest bound <= cp (the Mojo-side
+# mirror of mask lookup); the `is_*` wrappers add the ASCII fast paths, and
+# the derived predicates reuse one mask load instead of extra table bits.
 
 def fmt_list(vals, per_line, hexfmt):
     lines = []
@@ -266,13 +258,18 @@ def fmt_list(vals, per_line, hexfmt):
     return "\n".join(lines)
 
 
-def emit(bounds, masks, meta, unicode_note):
+def emit(bounds, masks, meta):
+    # Structural invariants first: the table must open at 0 (so every
+    # codepoint has a run to land in) and its last run must extend through
+    # U+10FFFF. Violations abort before anything is written.
     N = len(bounds)
     assert bounds[0] == 0, "table must start at U+0000"
     assert bounds[-1] <= MAX_CP - 1, "table must cover U+10FFFF"
     assert masks[0] == 0, "U+0000..first boundary must be mask 0"
 
     func_defs = []
+    # One wrapper per base class: table lookup, plus the ASCII fast path
+    # from FUNC_META where one exists (all but is_whitespace).
     for name, _, bit in BASE_FUNCS:
         _doc, ascii_expr = meta[name]
         if ascii_expr is None:
@@ -291,6 +288,9 @@ def emit(bounds, masks, meta, unicode_note):
         "@always_inline\ndef is_letter_or_digit(cp: Int) -> Bool:\n"
         "    return is_letter(cp) or is_digit(cp)\n"
     )
+    # Derived predicates: no extra table bits. "Upper/lower-like" means "a
+    # letter that isn't lowercase/uppercase, or a combining mark" — computed
+    # from the already-loaded mask, with the same ASCII fast path treatment.
     func_defs.append(
         "@always_inline\ndef is_upper_like(cp: Int) -> Bool:\n"
         "    if cp < 128:\n"
@@ -351,6 +351,8 @@ def _class_mask(cp: UInt32) -> UInt8:
 
 
 # ── main ─────────────────────────────────────────────────────────────────
+# Straight-line pipeline: derive intervals from the authoritative source,
+# gate the ASCII contract, build the table, emit the Mojo file.
 
 def unicode_note():
     import regex
@@ -359,59 +361,17 @@ def unicode_note():
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--no-regex", action="store_true",
-                    help="skip the regex oracle / chain-regex equality check")
-    args = ap.parse_args()
+    import regex  # fail fast here if the authoritative source is unavailable
 
-    try:
-        src = open(PRETOK).read()
-    except FileNotFoundError:
-        src = ""
-
-    chain = parse_chains(src) if src else {}
-
-    if not args.no_regex:
-        import regex
-
-        print(f"regex oracle: {unicode_note()}")
-        classes = {}
-        for name, pattern, _ in BASE_FUNCS:
-            classes[name] = regex_intervals(pattern)
-        if chain:
-            for name, _, _ in BASE_FUNCS:
-                if chain[name][2] != classes[name]:
-                    sys.exit(
-                        f"chain != regex oracle for {name} -- aborting "
-                        f"(chain {len(chain[name][2])} intervals, "
-                        f"regex {len(classes[name])} intervals)"
-                    )
-            print("chain == regex oracle for all 6 base classes")
-        else:
-            assert_ascii_branches(FUNC_META, classes)
-    elif chain:
-        classes = {name: chain[name][2] for name, _, _ in BASE_FUNCS}
-    else:
-        sys.exit("no chains and --no-regex: nothing to build from")
-
-    if chain and len(chain) != len(BASE_FUNCS):
-        sys.exit(f"could not parse all base functions; got {list(chain)}")
+    print(f"regex authoritative source: {unicode_note()}")
+    classes = {}
+    for name, pattern, _ in BASE_FUNCS:
+        classes[name] = regex_intervals(pattern)
+    assert_ascii_branches(FUNC_META, classes)
 
     bounds, masks = build_table(classes)
 
-    if chain:
-        # While the chains exist, their parsed (doc, ascii) must equal the
-        # hardcoded contract, and the table is asserted against the chains.
-        for name, _, _ in BASE_FUNCS:
-            if chain[name][:2] != FUNC_META[name]:
-                sys.exit(f"chain doc/ascii drift for {name}: {chain[name][:2]}")
-        assert_equivalence(bounds, masks, chain, classes)
-        meta = {name: FUNC_META[name] for name, _, _ in BASE_FUNCS}
-    else:
-        meta = FUNC_META
-
-    note = unicode_note() if not args.no_regex else "generated offline (--no-regex)"
-    emit(bounds, masks, meta, note)
+    emit(bounds, masks, FUNC_META)
 
 
 if __name__ == "__main__":
