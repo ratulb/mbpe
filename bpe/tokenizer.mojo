@@ -794,7 +794,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
             raise Error("token ID out of range: " + String(id))
         var span = self.token_table.arena.spans[id]
         var raw = self.token_table.arena.bytes.unsafe_ptr()
-        var result = String(capacity=span.length * 3)
+        var result = String(capacity_bytes=span.length * 3)
         for i in range(span.length):
             result += chr(self.byte_to_cp[Int(raw[unsafe_offset=span.offset + i])])
         return result^
@@ -824,7 +824,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         mut: Bool, //, origin: Origin[mut=mut]
     ](bytes: Span[Byte, origin]) -> String:
 
-        var key = String(capacity=len(bytes) * 4)
+        var key = String(capacity_bytes=len(bytes) * 4)
         for i in range(len(bytes)):
             if i > 0:
                 key += ","
