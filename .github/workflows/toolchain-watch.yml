@@ -37,6 +37,9 @@ jobs:
               for v in r.get(sect, {}).values():
                   if v.get('name') == 'mojo-compiler':
                       vers.add(v['version'])
+          # Exclude the legacy 25.* versioning scheme (pre-1.0 line, still
+          # published on the channel); only the 1.* line is comparable.
+          vers = {x for x in vers if not x.startswith('25.')}
           from packaging.version import Version
           print(sorted(vers, key=Version)[-1])
           " 2>/dev/null || python3 -c "
@@ -47,6 +50,7 @@ jobs:
               for v in r.get(sect, {}).values():
                   if v.get('name') == 'mojo-compiler':
                       vers.add(v['version'])
+          vers = {x for x in vers if not x.startswith('25.')}
           print(sorted(vers)[-1])
           ")"
           echo "pinned=$PINNED latest=$LATEST"
