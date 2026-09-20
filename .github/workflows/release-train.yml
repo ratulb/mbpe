@@ -1,0 +1,151 @@
+name: Release train (conda recipe PR)
+# Fans out from a published GitHub release: bumps the mbpe recipe in
+# ratulb/modular-community, validates it with rattler_build_test.sh (CI form),
+# pushes a fork branch and opens the upstream PR with the runbook body.
+# Needs secret TOOLCHAIN_BOT_PAT (fine-grained PAT: Contents read+write on
+# ratulb/modular-community). Manual runs can override every derived value.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      mbpe_version:
+        description: "mbpe version for context.version (default: release tag)"
+        required: false
+        default: ""
+      mbpe_rev:
+        description: "Full commit SHA for source.rev (default: release tag SHA)"
+        required: false
+        default: ""
+      recipe_build_number:
+        description: "build.number (default: upstream main + 1)"
+        required: false
+        default: ""
+      mojo_version:
+        description: 'mojo_version pin, e.g. =1.1.0 (default: pixi.toml pin)'
+        required: false
+        default: ""
+      dry_run:
+        description: "Validate + bump only; skip push and PR creation"
+        required: false
+        default: "false"
+
+jobs:
+  recipe-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      BOT_PAT: ${{ secrets.TOOLCHAIN_BOT_PAT }}
+    steps:
+      - name: Check out mbpe release
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Derive version, rev, pins
+        id: derive
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          [ -z "$TAG" ] && TAG="${{ github.ref_name }}"
+          VERSION="${{ inputs.mbpe_version }}"
+          [ -z "$VERSION" ] && VERSION="${TAG#v}"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "Cannot derive version (tag: $TAG); pass mbpe_version explicitly." >&2; exit 1; }
+          REV="${{ inputs.mbpe_rev }}"
+          [ -z "$REV" ] && REV="$(git rev-list -n 1 "$TAG")"
+          echo "$REV" | grep -qE '^[0-9a-f]{40}$' \
+            || { echo "Bad rev: $REV" >&2; exit 1; }
+          MOJO_PIN="$(python3 -c "
+          import re
+          txt = open('pixi.toml').read()
+          m = re.search(r'^mojo\s*=\s*\"==([^\"]+)\"', txt, re.M)
+          print(m.group(1))
+          ")"
+          MOJO_VER="${{ inputs.mojo_version }}"
+          [ -z "$MOJO_VER" ] && MOJO_VER="=$MOJO_PIN"
+          UPSTREAM_NUM="$(curl -fsSL --max-time 60 \
+            https://raw.githubusercontent.com/modular/modular-community/main/recipes/mbpe/recipe.yaml \
+            | grep -E '^  number: [0-9]+$' | awk '{print $2}')"
+          NUM="${{ inputs.recipe_build_number }}"
+          [ -z "$NUM" ] && NUM="$((UPSTREAM_NUM + 1))"
+          BRANCH="mbpe-${VERSION}-mojo-$(echo "$MOJO_PIN" | tr . _)"
+          echo "tag=$TAG version=$VERSION rev=$REV mojo=$MOJO_VER build=$NUM branch=$BRANCH"
+          {
+            echo "version=$VERSION"
+            echo "rev=$REV"
+            echo "mojo_ver=$MOJO_VER"
+            echo "num=$NUM"
+            echo "branch=$BRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install pixi (for rattler-build)
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | sh
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Clone fork and apply recipe bump
+        env:
+          BRANCH: ${{ steps.derive.outputs.branch }}
+        run: |
+          git clone "https://x-access-token:${BOT_PAT}@github.com/ratulb/modular-community.git" fork
+          cd fork
+          git config user.name "mbpe-release-train"
+          git config user.email "mbpe-release-train@users.noreply.github.com"
+          if git ls-remote --heads origin "$BRANCH" | grep -q .; then
+            echo "Branch $BRANCH already exists on fork; aborting." >&2
+            exit 1
+          fi
+          git checkout -b "$BRANCH"
+          python3 - "$VERSION" "$REV" "$MOJO_VER" "$NUM" <<'EOF'
+          import re, sys
+          version, rev, mojo_ver, num = sys.argv[1:5]
+          p = 'recipes/mbpe/recipe.yaml'
+          txt = open(p).read()
+          def once(pattern, repl, name):
+              global txt
+              found = re.findall(pattern, txt, re.M)
+              assert len(found) == 1, f"{name}: expected 1 match, got {len(found)}"
+              txt = re.sub(pattern, repl, txt, count=1, flags=re.M)
+          once(r'^  version: "[^"]+"$', f'  version: "{version}"', 'context.version')
+          once(r'^  mojo_version: "[^"]+"$', f'  mojo_version: "{mojo_ver}"', 'mojo_version')
+          once(r'^    rev: [0-9a-f]{40}$', f'    rev: {rev}', 'source.rev')
+          once(r'^  number: \d+$', f'  number: {num}', 'build.number')
+          open(p, 'w').write(txt)
+          print("recipe bumped OK")
+          EOF
+          grep -nE '^  (version|mojo_version|number):|^    rev:' recipes/mbpe/recipe.yaml
+          git add recipes/mbpe/recipe.yaml
+          git commit -m "mbpe recipe: source $REV, build $NUM"
+
+      - name: Validate recipe (CI form)
+        run: |
+          bash rattler_build_test.sh "$GITHUB_WORKSPACE/fork/recipes/mbpe/recipe.yaml"
+
+      - name: Push branch and open upstream PR
+        if: inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TOOLCHAIN_BOT_PAT }}
+          BRANCH: ${{ steps.derive.outputs.branch }}
+          VERSION: ${{ steps.derive.outputs.version }}
+          REV: ${{ steps.derive.outputs.rev }}
+          MOJO_VER: ${{ steps.derive.outputs.mojo_ver }}
+          NUM: ${{ steps.derive.outputs.num }}
+        run: |
+          cd fork
+          git push origin "$BRANCH"
+          if gh pr list --repo modular/modular-community --head "ratulb:$BRANCH" \
+              --json number --jq '.[].number' | grep -q .; then
+            echo "PR already open for $BRANCH; skipping create."
+            exit 0
+          fi
+          gh pr create --repo modular/modular-community \
+            --base main --head "ratulb:$BRANCH" \
+            --title "Add mbpe recipe (mojo ${MOJO_VER#=}, source ${REV:0:7})" \
+            --body "mbpe conda recipe, validated end-to-end locally via \`rattler_build_test.sh\` (CI form).
+
+          - package: mbpe $VERSION (build $NUM)
+          - source: https://github.com/ratulb/mbpe rev \`$REV\`
+          - \`mojo-compiler ${MOJO_VER}\` (matches the source tree pin)
+          - test phase: \`mojo run test_import.mojo\` in an isolated env (package loads)
+
+          Could a maintainer approve the build workflow? Thank you!"

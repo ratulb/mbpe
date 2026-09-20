@@ -1,0 +1,87 @@
+name: Toolchain watch
+# Polls the conda.modular.com/max channel for a new mojo-compiler.
+# On change: opens a tracking issue with the migration checklist (notify-only).
+# No pushes, no branches, no secrets — cannot misfire.
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Mondays 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare pinned Mojo against channel latest
+        id: cmp
+        run: |
+          PINNED="$(python3 -c "
+          import re
+          txt = open('pixi.toml').read()
+          m = re.search(r'^mojo\s*=\s*\"==([^\"]+)\"', txt, re.M)
+          print(m.group(1))
+          ")"
+          echo "pinned=$PINNED"
+          curl -fsSL --max-time 120 \
+            https://conda.modular.com/max/linux-64/repodata.json \
+            -o /tmp/max_repodata.json
+          LATEST="$(python3 -c "
+          import json
+          r = json.load(open('/tmp/max_repodata.json'))
+          vers = set()
+          for sect in ('packages', 'packages.conda'):
+              for v in r.get(sect, {}).values():
+                  if v.get('name') == 'mojo-compiler':
+                      vers.add(v['version'])
+          from packaging.version import Version
+          print(sorted(vers, key=Version)[-1])
+          " 2>/dev/null || python3 -c "
+          import json
+          r = json.load(open('/tmp/max_repodata.json'))
+          vers = set()
+          for sect in ('packages', 'packages.conda'):
+              for v in r.get(sect, {}).values():
+                  if v.get('name') == 'mojo-compiler':
+                      vers.add(v['version'])
+          print(sorted(vers)[-1])
+          ")"
+          echo "pinned=$PINNED latest=$LATEST"
+          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if [ "$LATEST" != "$PINNED" ]; then
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open tracking issue (if none open for this version)
+        if: steps.cmp.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.cmp.outputs.latest }}
+          PINNED: ${{ steps.cmp.outputs.pinned }}
+        run: |
+          gh label create toolchain --description "Mojo toolchain migration" \
+            --color "5319e7" 2>/dev/null || true
+          if gh issue list --label toolchain --state open \
+              --search "Mojo $LATEST in:title" --json title \
+              --jq '.[].title' | grep -q .; then
+            echo "Issue already open for Mojo $LATEST; skipping."
+            exit 0
+          fi
+          gh issue create --label toolchain \
+            --title "Mojo $LATEST detected (pinned $PINNED) — migration needed" \
+            --body "Channel \`mojo-compiler\` is now at **$LATEST**; this repo pins **$PINNED**.
+
+          Migration checklist:
+          1. Bump the \`mojo\` pin in \`pixi.toml\` and re-solve.
+          2. Fix source breakage (see release notes at https://mojolang.org/releases/).
+          3. Full suite green: \`bash scripts/run_tests.sh\` (must print \`All tests passed.\`).
+          4. Recipe validation green: \`bash rattler_build_test.sh\`.
+          5. Publish source + cut a GitHub release (fires PyPI publish and the release-train recipe PR automatically).
+          6. After the recipe PR opens upstream, ask the maintainer for \`OK to test\` and merge.
+          7. Verify the channel package resolves and downstream stays green."
