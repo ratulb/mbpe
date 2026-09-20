@@ -91,7 +91,13 @@ jobs:
       - name: Clone fork and apply recipe bump
         env:
           BRANCH: ${{ steps.derive.outputs.branch }}
+          VERSION: ${{ steps.derive.outputs.version }}
+          REV: ${{ steps.derive.outputs.rev }}
+          MOJO_VER: ${{ steps.derive.outputs.mojo_ver }}
+          NUM: ${{ steps.derive.outputs.num }}
         run: |
+          [ -n "$VERSION" ] && [ -n "$REV" ] && [ -n "$MOJO_VER" ] && [ -n "$NUM" ] \
+            || { echo "ERROR: empty bump value (v=$VERSION rev=$REV mojo=$MOJO_VER n=$NUM)" >&2; exit 1; }
           git clone "https://x-access-token:${BOT_PAT}@github.com/ratulb/modular-community.git" fork
           cd fork
           git config user.name "mbpe-release-train"
@@ -104,6 +110,11 @@ jobs:
           python3 - "$VERSION" "$REV" "$MOJO_VER" "$NUM" <<'EOF'
           import re, sys
           version, rev, mojo_ver, num = sys.argv[1:5]
+          assert version and rev and mojo_ver and num, "empty bump arg"
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), version
+          assert re.fullmatch(r'[0-9a-f]{40}', rev), rev
+          assert re.fullmatch(r'=\d+\.\d+\.\d+', mojo_ver), mojo_ver
+          assert num.isdigit(), num
           p = 'recipes/mbpe/recipe.yaml'
           txt = open(p).read()
           def once(pattern, repl, name):
