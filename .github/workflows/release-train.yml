@@ -63,11 +63,16 @@ jobs:
           ")"
           MOJO_VER="${{ inputs.mojo_version }}"
           [ -z "$MOJO_VER" ] && MOJO_VER="=$MOJO_PIN"
+          [ -n "$MOJO_PIN" ] || { echo "ERROR: no mojo pin in pixi.toml" >&2; exit 1; }
           UPSTREAM_NUM="$(curl -fsSL --max-time 60 \
             https://raw.githubusercontent.com/modular/modular-community/main/recipes/mbpe/recipe.yaml \
             | grep -E '^  number: [0-9]+$' | awk '{print $2}')"
+          [ -n "$UPSTREAM_NUM" ] \
+            || { echo "ERROR: could not read upstream build.number" >&2; exit 1; }
           NUM="${{ inputs.recipe_build_number }}"
           [ -z "$NUM" ] && NUM="$((UPSTREAM_NUM + 1))"
+          echo "$NUM" | grep -qE '^[0-9]+$' \
+            || { echo "ERROR: bad build number: $NUM" >&2; exit 1; }
           BRANCH="mbpe-${VERSION}-mojo-$(echo "$MOJO_PIN" | tr . _)"
           echo "tag=$TAG version=$VERSION rev=$REV mojo=$MOJO_VER build=$NUM branch=$BRANCH"
           {
