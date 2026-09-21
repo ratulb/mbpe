@@ -40,7 +40,7 @@ print(tokenizer.decode(tokens)) # "hello world"
 
 <img src="https://github.com/ratulb/mbpe/blob/main/docs/assets/benchmark_chart.svg" width="800" alt="Encode/decode throughput by encoding">
 
-*Environment: AMD EPYC 9B45, 4 cores, 15Gi RAM, Debian GNU/Linux 12 (bookworm). Mojo 1.0.0, Python 3.14.7, Rust 1.98.1, tiktoken 0.14.0.*
+*Environment: AMD EPYC 9B45, 4 cores, 15Gi RAM, Debian GNU/Linux 12 (bookworm). Mojo 1.1.0, Python 3.14.7, Rust 1.98.1, tiktoken 0.14.0.*
 
 ---
 
