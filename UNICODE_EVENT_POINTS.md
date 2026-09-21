@@ -1,7 +1,6 @@
 # UNICODE_EVENT_POINTS.md — How the event-point table is built
 
-Companion to §7 of `language-models-dont-see-text.md`. This file traces the construction
-mechanism end to end: what problem the table solves, why the naive
+What problem the bpe/unicode_tables.mojo solves, why the naive
 representation is wasteful, what the "event point" idea is, and then a
 worked example at real scale. Code references are to
 `scripts/gen_unicode_tables.py` (`build_table`) and `bpe/unicode_tables.mojo`
