@@ -4,27 +4,31 @@
 [![CodeQL](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mbpe.svg)](https://pypi.org/project/mbpe/)
 
-**A trainable byte-pair encoding engine in Mojo, generic over a compile-time pre-tokenizer — the engine knows only BPE; everything family-specific lives in the plug**. Ships with GPT-2, GPT-4, and GPT-4o pre-tokenizers, and reproduces OpenAI's .tiktoken vocabularies byte-for-byte — verified against the reference implementation on every change, not assumed. Native encode/decode beats tiktoken-rs (Rust) on every benchmark; see [Benchmarks](#benchmarks).
+**A trainable byte-pair encoding engine in Mojo, generic over a compile-time pre-tokenizer.** The BPE engine knows only BPE; tokenizer-family differences live in the pre-tokenizer. Ships with GPT-2, GPT-4, and GPT-4o pre-tokenizers.
 
 ```python
 import mbpe
 
 tokenizer = mbpe.get_encoding("gpt2")
 tokens = tokenizer.encode("hello world")
-print(tokens)                          # [31373, 995]
-print(tokenizer.decode(tokens))        # "hello world"
+
+print(tokens)                   # [31373, 995]
+print(tokenizer.decode(tokens)) # "hello world"
 ```
 
 ---
 
 ## Why mbpe?
 
-- **Drop-in for [`tiktoken`](https://github.com/openai/tiktoken)** — same `get_encoding()`, same `encode()`/`allowed_special`/`disallowed_special`, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
-- **Fast** — Mojo native is competitive on both encode and decode across all three encodings with existing tokenizers. See [Benchmarks](#benchmarks)
-- **Fast Python bindings** - Substantially outperform Python `tiktoken`, while still remaining competitive with [`tiktoken-rs`](https://github.com/zurawiki/tiktoken-rs).
-- **Train your own** — `tokenizer.train(["hello world"], vocab_size=300)`, then save directly to `.tiktoken` format.
-- **Extensible by design** — `PreTokenizer` is a Mojo trait, not a hardcoded implementation. Ships with r50k_base, cl100k_base, and o200k_base; write your own to match it.
-- **Byte-level, lossless** — all 256 bytes are base vocabulary. No UNK token. Any valid UTF-8 input round-trips exactly.
+**Drop-in for `tiktoken`**. Same `get_encoding()`, `encode()` / `allowed_special` / `disallowed_special` handling, same `.tiktoken` file format. Point existing code at `mbpe` and it works.
+
+**Train your own**. `tokenizer.train(["hello world"], vocab_size=300)`, then save directly to `.tiktoken` format. `tiktoken` ships vocabularies; `mbpe` builds them.
+
+**A BPE engine that doesn't know about encodings**. The core is `BPETokenizer[PT: PreTokenizer]`, generic over a compile-time Mojo trait. The engine knows only about BPE. Byte mappings, split rules, and special-token sets — the things that distinguish `r50k_base`, `cl100k_base`, and `o200k_base` — are `PreTokenizer` implementations. Adding a new encoding means providing a new `PreTokenizer`, not modifying the engine. The BPE core has no knowledge of `.tiktoken` files or specific encodings.
+
+**Byte-level and lossless**. All 256 bytes are in the base vocabulary. No `<UNK>` token. Any valid UTF-8 input round-trips exactly.
+
+**Fast**. Mojo-native encode and decode are competitive with existing tokenizers across shipped encodings. Python bindings substantially outperform Python `tiktoken` and remain competitive with `tiktoken-rs`.
 
 ---
 
@@ -40,9 +44,6 @@ print(tokenizer.decode(tokens))        # "hello world"
 
 ---
 
-> ⭐ — Helps others discover it!
-
----
 
 ## Installation
 
