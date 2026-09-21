@@ -3,12 +3,8 @@
 [![Tests](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/python-tests.yml)
 [![CodeQL](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml/badge.svg)](https://github.com/ratulb/mbpe/actions/workflows/codeql.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mbpe.svg)](https://pypi.org/project/mbpe/)
-<!--[![PyPI downloads](https://img.shields.io/pypi/dm/mbpe)](https://pypi.org/project/mbpe/)
 
-A **high-performance**, trainable, tiktoken-compatible BPE tokenizer written in **Mojo**.
-The compile-time `PreTokenizer` trait enables GPT-2, GPT-4, GPT-4o and custom tokenization pipelines without changing the core tokenizer.-->
-
-**A byte-pair encoding engine in Mojo, generic over a compile-time pre-tokenizer — the engine knows only BPE; everything family-specific lives in the plug**. Ships with GPT-2, GPT-4, and GPT-4o pre-tokenizers, and reproduces OpenAI's .tiktoken vocabularies byte-for-byte — verified against the reference implementation on every change, not assumed. Native encode/decode beats tiktoken-rs (Rust) on every benchmark; see [Benchmarks](#benchmarks).
+**A trainable byte-pair encoding engine in Mojo, generic over a compile-time pre-tokenizer — the engine knows only BPE; everything family-specific lives in the plug**. Ships with GPT-2, GPT-4, and GPT-4o pre-tokenizers, and reproduces OpenAI's .tiktoken vocabularies byte-for-byte — verified against the reference implementation on every change, not assumed. Native encode/decode beats tiktoken-rs (Rust) on every benchmark; see [Benchmarks](#benchmarks).
 
 ```python
 import mbpe
