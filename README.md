@@ -34,7 +34,7 @@ print(tokenizer.decode(tokens)) # "hello world"
 
 ## Benchmarks
 
-5 MB corpus (Alice in Wonderland), best-of-3 encode + decode, pre-trained 50K+ vocabularies.
+5 MB corpus (Alice in Wonderland), best-of-3 `encode` + `decode`, pre-trained 50K+ vocabularies.
 
 > **Across all three OpenAI encodings, native Mojo is consistently the fastest implementation for both encoding and decoding, while the Python bindings substantially outperform Python tiktoken**.
 
