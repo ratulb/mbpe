@@ -25,7 +25,7 @@ CORPORA=(
 RESULTS_DIR="$BMDIR/results"
 
 echo "╔══════════════════════════════════════════════════════════════╗" >&2
-echo "║  simple_bpe  —  Multi-Language Benchmark Suite              ║" >&2
+echo "║  mbpe        —  Multi-Language Benchmark Suite              ║" >&2
 echo "╚══════════════════════════════════════════════════════════════╝" >&2
 
 # ── Setup dependencies (stdout → stderr) ────────────────────────

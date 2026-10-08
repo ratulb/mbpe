@@ -303,7 +303,7 @@ def encode_paircache(tok: BPETokenizer, text: String, ref cache: PairCache) rais
 
 def run() raises:
     print("=" * 55)
-    print("  Encode approach comparison — simple_bpe")
+    print("  Encode approach comparison — mbpe")
     print("=" * 55)
 
     print("\nBuilding corpus and training...")

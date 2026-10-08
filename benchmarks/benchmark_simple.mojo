@@ -1,4 +1,4 @@
-"""Benchmark suite for simple_bpe BPETokenizer encode/decode speed."""
+"""Benchmark suite for mbpe BPETokenizer encode/decode speed."""
 
 from bpe.tokenizer import BPETokenizer
 from std.time import perf_counter_ns
@@ -101,7 +101,7 @@ def build_corpus() raises -> String:
 # ── benchmark ────────────────────────────────────────────────────────────
 
 def run_benchmark() raises:
-    print("simple_bpe — Benchmark Suite")
+    print("mbpe — Benchmark Suite")
     print("============================\n")
 
     # Build corpus and train
