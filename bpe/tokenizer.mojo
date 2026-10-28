@@ -528,9 +528,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         return count
 
     def encode_ordinary[
-        mut: Bool,
-        //,
-        origin: Origin[mut=mut],
+        origin: ImmOrigin,
     ](self, text: StringSpan[origin]) raises -> IntArray:
 
         if text.byte_length() == 0:
@@ -576,17 +574,13 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         return self.decode(Span[Int](token_ids))
 
     def pretokenize[
-        mut: Bool,
-        //,
-        origin: Origin[mut=mut],
+        origin: ImmOrigin,
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
         return self.pt.split(text)
 
     def encode[
-        mut: Bool,
-        //,
-        origin: Origin[mut=mut],
+        origin: ImmOrigin,
     ](self, text: StringSpan[origin]) raises -> IntArray:
 
         if len(self.special_bytes) == 0:
@@ -800,7 +794,7 @@ struct BPETokenizer[PT: PreTokenizer = GPT2Pretokenizer](
         return result^
 
     def encode_single_token[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin]) raises -> Int:
 
         for item in self.special_bytes.items():

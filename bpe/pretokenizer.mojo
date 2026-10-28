@@ -371,7 +371,7 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
         return rank
 
     def split[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
         var result = List[StringSpan[origin]]()
@@ -380,7 +380,7 @@ trait PreTokenizer(Movable & Defaultable & Deinitable & Writable):
         return result^
 
     def count_words[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
         ref views = self.split(text)
@@ -612,7 +612,7 @@ struct GPT2Pretokenizer(PreTokenizer):
         return Self.match_single_ws(span, pos)
 
     def split[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
         var result = List[StringSpan[origin]]()
@@ -631,7 +631,7 @@ struct GPT2Pretokenizer(PreTokenizer):
         return result^
 
     def count_words[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
         var n = text.byte_length()
@@ -1129,7 +1129,7 @@ struct GPT4Pretokenizer[
             return Self.match_single_ws(span, pos)
 
     def split[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin]) raises -> List[StringSpan[origin]]:
 
         var result = List[StringSpan[origin]]()
@@ -1148,7 +1148,7 @@ struct GPT4Pretokenizer[
         return result^
 
     def count_words[
-        mut: Bool, //, origin: Origin[mut=mut]
+        origin: ImmOrigin, //
     ](self, text: StringSpan[origin], mut counts: WordCounts) raises:
 
         var n = text.byte_length()

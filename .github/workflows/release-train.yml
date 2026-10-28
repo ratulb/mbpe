@@ -22,7 +22,7 @@ on:
         required: false
         default: ""
       mojo_version:
-        description: 'mojo_version pin, e.g. =1.1.0 (default: pixi.toml pin)'
+        description: 'mojo_version pin, e.g. =1.2.0 (default: pixi.toml pin)'
         required: false
         default: ""
       dry_run:

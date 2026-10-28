@@ -775,13 +775,13 @@ def test_tokenizer_trait_conformance() raises:
     corpus.append(text)
     var t2 = BPETokenizer[GPT2Pretokenizer]()
     t2.train(corpus, 300)
-    assert_equal(_roundtrip_via_trait(t2^, text), text)
+    assert_equal(_roundtrip_via_trait(t2, text), text)
     var t4s = BPETokenizer[GPT4Pretokenizer[ByteMapping.SEQUENTIAL]]()
     t4s.train(corpus, 300)
-    assert_equal(_roundtrip_via_trait(t4s^, text), text)
+    assert_equal(_roundtrip_via_trait(t4s, text), text)
     var t4h = BPETokenizer[GPT4Pretokenizer[ByteMapping.SHUFFLED]]()
     t4h.train(corpus, 300)
-    assert_equal(_roundtrip_via_trait(t4h^, text), text)
+    assert_equal(_roundtrip_via_trait(t4h, text), text)
 
 
 def main() raises:

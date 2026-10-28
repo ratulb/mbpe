@@ -55,7 +55,7 @@ def _uint8_list_list_to_py_list(data: List[List[UInt8]]) raises -> PythonObject:
 
 
 def _views_to_py_bytes[
-    mut: Bool, //, origin: Origin[mut=mut]
+    origin: ImmOrigin, //
 ](views: List[StringSpan[origin]]) raises -> PythonObject:
     """Copy zero-copy word views into a Python list of bytes objects."""
     var py_vals = List[PythonObject](capacity=len(views))
@@ -240,7 +240,7 @@ def _load_tiktok_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> 
 def _reg_special_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT2TK]()
     var tokens = _py_dict_to_mojo(args[0])
-    ptr[].register_special_tokens(tokens^)
+    ptr[].register_special_tokens(tokens)
     return PythonObject(None)
 
 def _get_specials_gpt2(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -256,7 +256,7 @@ def _set_specials_gpt2(mut self: PythonObject, mut args: PythonObject) raises ->
     var tokens = _py_dict_to_mojo(args[0])
     ptr[].special_bytes = Dict[String, Int]()
     ptr[].inverse_special = Dict[Int, String]()
-    ptr[].register_special_tokens(tokens^)
+    ptr[].register_special_tokens(tokens)
     return PythonObject(None)
 
 
@@ -313,7 +313,7 @@ def _load_tiktok_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> 
 def _reg_special_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4TK]()
     var tokens = _py_dict_to_mojo(args[0])
-    ptr[].register_special_tokens(tokens^)
+    ptr[].register_special_tokens(tokens)
     return PythonObject(None)
 
 def _get_specials_gpt4(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -329,7 +329,7 @@ def _set_specials_gpt4(mut self: PythonObject, mut args: PythonObject) raises ->
     var tokens = _py_dict_to_mojo(args[0])
     ptr[].special_bytes = Dict[String, Int]()
     ptr[].inverse_special = Dict[Int, String]()
-    ptr[].register_special_tokens(tokens^)
+    ptr[].register_special_tokens(tokens)
     return PythonObject(None)
 
 
@@ -386,7 +386,7 @@ def _load_tiktok_gpt4o(mut self: PythonObject, mut args: PythonObject) raises ->
 def _reg_special_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
     var ptr = self.downcast_value_ptr[GPT4oTK]()
     var tokens = _py_dict_to_mojo(args[0])
-    ptr[].register_special_tokens(tokens^)
+    ptr[].register_special_tokens(tokens)
     return PythonObject(None)
 
 def _get_specials_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -> PythonObject:
@@ -402,7 +402,7 @@ def _set_specials_gpt4o(mut self: PythonObject, mut args: PythonObject) raises -
     var tokens = _py_dict_to_mojo(args[0])
     ptr[].special_bytes = Dict[String, Int]()
     ptr[].inverse_special = Dict[Int, String]()
-    ptr[].register_special_tokens(tokens^)
+    ptr[].register_special_tokens(tokens)
     return PythonObject(None)
 
 

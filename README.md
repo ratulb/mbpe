@@ -59,7 +59,7 @@ Linux x86_64 only (Mojo runtime bundled). Requires Python ≥ 3.9.
 pixi add mbpe --channel https://repo.prefix.dev/modular-community
 ```
 
-Requires `mojo-compiler >=1.1.0`. The `.tiktoken` data files are auto-discovered when the environment is activated (via `MBPE_DATA_DIR`). Set this env var manually if using outside conda.
+Requires `mojo-compiler >=1.2.0`. The `.tiktoken` data files are auto-discovered when the environment is activated (via `MBPE_DATA_DIR`). Set this env var manually if using outside conda.
 
 ---
 
